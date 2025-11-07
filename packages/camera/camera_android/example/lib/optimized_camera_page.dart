@@ -4,7 +4,6 @@
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:camera_example/camera_controller.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
@@ -63,14 +62,19 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   // Board overlay
   final _boardScreenshotController = ScreenshotController();
   bool _isBoardVisible = true;
-  Offset? _boardPosition;
-  Size? _boardSize;
+  late Offset _boardPosition;
+  late Size _boardSize;
   Uint8List? _boardScreenshotBytes;
+
+  // Preview rendering key để lấy actual screen size
+  final GlobalKey _previewKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _initializeCamera();
+    _boardPosition = const Offset(20, 100);
+    _boardSize = const Size(300, 200);
     _startOrientationTracking();
   }
 
@@ -351,9 +355,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       return cameraImagePath;
     }
 
-    // Use default position if not set (board hasn't been dragged yet)
-    final boardPos = _boardPosition ?? const Offset(20, 100);
-
     try {
       final mergeStopwatch = Stopwatch()..start();
 
@@ -427,55 +428,131 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('✅ Orientations match, no rotation needed');
       }
 
-      Logger.log('📍 Board screen position: ${boardPos.dx}, ${boardPos.dy}');
+      Logger.log(
+          '📍 Board screen position: ${_boardPosition.dx}, ${_boardPosition.dy}');
 
-      // 5. Calculate scale factors với rotated image
-      final scaleX = cameraWidth / previewWidth;
-      final scaleY = cameraHeight / previewHeight;
+      // 5. Get device pixel ratio - board screenshot bị scale bởi pixel ratio
+      final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+      Logger.log('📱 Device pixel ratio: $pixelRatio');
+
+      // 6. Calculate board widget's actual size (before pixel ratio scaling)
+      final boardWidgetWidth = boardWidth / pixelRatio;
+      final boardWidgetHeight = boardHeight / pixelRatio;
 
       Logger.log(
-          '📊 Scale factors (after orientation fix): X=$scaleX, Y=$scaleY');
+          '📐 Board widget size (logical pixels): ${boardWidgetWidth.toStringAsFixed(1)}x${boardWidgetHeight.toStringAsFixed(1)}');
 
-      // 6. Map board position từ preview coordinates → image coordinates
-      var imageBoardX = (boardPos.dx * scaleX).toInt();
-      var imageBoardY = (boardPos.dy * scaleY).toInt();
+      // 7. Get actual preview screen size (rendered on screen)
+      final renderBox =
+          _previewKey.currentContext?.findRenderObject() as RenderBox?;
+      if (renderBox == null) {
+        Logger.log('❌ Cannot get preview render box');
+        return cameraImagePath;
+      }
+
+      final previewScreenSize = renderBox.size;
+      Logger.log(
+          '📺 Preview screen size (container): ${previewScreenSize.width.toStringAsFixed(1)}x${previewScreenSize.height.toStringAsFixed(1)}');
+
+      // 8. Calculate BoxFit.cover scaling and offset
+      // Preview native size (what FittedBox is trying to fit)
+      final nativeWidth = previewWidth;
+      final nativeHeight = previewHeight;
+
+      Logger.log(
+          '📺 Preview native size: ${nativeWidth.toStringAsFixed(1)}x${nativeHeight.toStringAsFixed(1)}');
+
+      // Calculate scale for BoxFit.cover (fill container, crop excess)
+      final scaleToFitWidth = previewScreenSize.width / nativeWidth;
+      final scaleToFitHeight = previewScreenSize.height / nativeHeight;
+      final fitScale =
+          math.max(scaleToFitWidth, scaleToFitHeight); // cover uses max
+
+      Logger.log(
+          '📐 BoxFit.cover scale: ${fitScale.toStringAsFixed(3)} (width: ${scaleToFitWidth.toStringAsFixed(3)}, height: ${scaleToFitHeight.toStringAsFixed(3)})');
+
+      // Calculate actual rendered size after scaling (before crop)
+      final renderedWidth = nativeWidth * fitScale;
+      final renderedHeight = nativeHeight * fitScale;
+
+      Logger.log(
+          '📏 Rendered size (before crop): ${renderedWidth.toStringAsFixed(1)}x${renderedHeight.toStringAsFixed(1)}');
+
+      // Calculate crop offset (BoxFit.cover centers the content)
+      final offsetX = (renderedWidth - previewScreenSize.width) / 2;
+      final offsetY = (renderedHeight - previewScreenSize.height) / 2;
+
+      Logger.log(
+          '✂️ Crop offset: X=${offsetX.toStringAsFixed(1)}, Y=${offsetY.toStringAsFixed(1)}');
+
+      // 9. Calculate scale factors từ preview screen → camera image
+      // Cần map từ: board screen position → preview native position → camera image
+      final scaleX = cameraWidth / nativeWidth;
+      final scaleY = cameraHeight / nativeHeight;
+
+      Logger.log(
+          '📊 Scale factors (native→image): X=${scaleX.toStringAsFixed(2)}, Y=${scaleY.toStringAsFixed(2)}');
+
+      // 10. Map board position từ screen coordinates → image coordinates
+      // Step 1: Add crop offset to get position on rendered preview (before crop)
+      final posOnRenderedX = _boardPosition.dx + offsetX;
+      final posOnRenderedY = _boardPosition.dy + offsetY;
+
+      Logger.log(
+          '📍 Board position on rendered preview: (${posOnRenderedX.toStringAsFixed(1)}, ${posOnRenderedY.toStringAsFixed(1)})');
+
+      // Step 2: Scale down to native preview coordinates
+      final posOnNativeX = posOnRenderedX / fitScale;
+      final posOnNativeY = posOnRenderedY / fitScale;
+
+      Logger.log(
+          '📍 Board position on native preview: (${posOnNativeX.toStringAsFixed(1)}, ${posOnNativeY.toStringAsFixed(1)})');
+
+      // Step 3: Scale up to camera image coordinates
+      var imageBoardX = (posOnNativeX * scaleX).toInt();
+      var imageBoardY = (posOnNativeY * scaleY).toInt();
 
       Logger.log('🎯 Board position on image: ($imageBoardX, $imageBoardY)');
 
-      // 7. Scale board size để match với image resolution
-      // Board được capture ở preview resolution, cần scale lên image resolution
-      var scaledBoardWidth = (boardWidth * scaleX).toInt();
-      var scaledBoardHeight = (boardHeight * scaleY).toInt();
+      // 11. Scale board size để match với image resolution
+      // Board widget on screen → native preview size → image size
+      // Step 1: Convert board widget size to native preview size
+      final boardOnNativeWidth = boardWidgetWidth / fitScale;
+      final boardOnNativeHeight = boardWidgetHeight / fitScale;
+
+      Logger.log(
+          '📐 Board size on native preview: ${boardOnNativeWidth.toStringAsFixed(1)}x${boardOnNativeHeight.toStringAsFixed(1)}');
+
+      // Step 2: Scale to image resolution
+      var scaledBoardWidth = (boardOnNativeWidth * scaleX).toInt();
+      var scaledBoardHeight = (boardOnNativeHeight * scaleY).toInt();
 
       Logger.log(
           '📏 Board size on image: ${scaledBoardWidth}x$scaledBoardHeight');
 
-      // 8. VALIDATION: Ensure board fits within image after scaling
+      // 12. VALIDATION: Ensure board fits within image after scaling
       if (scaledBoardWidth > cameraWidth || scaledBoardHeight > cameraHeight) {
-        Logger.log(
-            '⚠️ Board too large after scaling, adjusting scale factors...');
+        Logger.log('⚠️ Board too large after scaling, adjusting...');
 
-        // Calculate maximum allowed scale to fit within image
-        final maxScaleX = cameraWidth / boardWidth;
-        final maxScaleY = cameraHeight / boardHeight;
-        final maxScale = math.min(maxScaleX, maxScaleY) * 0.95; // 95% margin
+        // Calculate maximum allowed size on native preview
+        final maxNativeWidth = cameraWidth / scaleX;
+        final maxNativeHeight = cameraHeight / scaleY;
 
-        // Recalculate with limited scale
-        final limitedScaleX = math.min(scaleX, maxScale);
-        final limitedScaleY = math.min(scaleY, maxScale);
+        // Limit board size on native preview
+        final limitedNativeWidth =
+            math.min(boardOnNativeWidth, maxNativeWidth * 0.95);
+        final limitedNativeHeight =
+            math.min(boardOnNativeHeight, maxNativeHeight * 0.95);
 
-        // Recalculate position and size with limited scale
-        imageBoardX = (boardPos.dx * limitedScaleX).toInt();
-        imageBoardY = (boardPos.dy * limitedScaleY).toInt();
-        scaledBoardWidth = (boardWidth * limitedScaleX).toInt();
-        scaledBoardHeight = (boardHeight * limitedScaleY).toInt();
+        // Recalculate image size
+        scaledBoardWidth = (limitedNativeWidth * scaleX).toInt();
+        scaledBoardHeight = (limitedNativeHeight * scaleY).toInt();
 
         Logger.log(
             '🔄 Adjusted board size: ${scaledBoardWidth}x$scaledBoardHeight');
-        Logger.log('🔄 Adjusted position: ($imageBoardX, $imageBoardY)');
       }
 
-      // 9. Convert board to BGR if it has alpha channel
+      // 13. Convert board to BGR if it has alpha channel
       cv.Mat boardBGR = boardMat;
       if (boardMat.channels == 4) {
         Logger.log('🎨 Converting RGBA to BGR...');
@@ -483,16 +560,16 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('✅ Converted: ${mergeStopwatch.elapsedMilliseconds}ms');
       }
 
-      /// 10. Resize board to image resolution scale
+      // 14. Resize board to image resolution scale
       Logger.log(
           '🔧 Resizing board to ${scaledBoardWidth}x$scaledBoardHeight...');
 
-// FIX: Sử dụng utility function để tránh nhầm lẫn
+      // Resize board screenshot từ high-DPI size xuống target size
       cv.Mat scaledBoard =
           _resizeMat(boardBGR, scaledBoardWidth, scaledBoardHeight);
       Logger.log('✅ Board resized: ${mergeStopwatch.elapsedMilliseconds}ms');
 
-// 10.1. CRITICAL: Verify actual dimensions after resize
+      // 15. CRITICAL: Verify actual dimensions after resize
       final actualWidth = scaledBoard.cols; // Width
       final actualHeight = scaledBoard.rows; // Height
 
@@ -515,13 +592,13 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       }
       Logger.log('✅ Dimension and channel verification passed');
 
-      // 11. Clamp position để board không vượt bounds (use actual dimensions)
+      // 16. Clamp position để board không vượt bounds (use actual dimensions)
       final finalX = imageBoardX.clamp(0, cameraWidth - actualWidth);
       final finalY = imageBoardY.clamp(0, cameraHeight - actualHeight);
 
       Logger.log('✅ Final position (clamped): ($finalX, $finalY)');
 
-      // 12. Final bounds validation với actual dimensions
+      // 17. Final bounds validation với actual dimensions
       Logger.log('📋 Preparing to overlay board at ($finalX, $finalY)...');
       Logger.log(
           '🔍 Final bounds check: board(${actualWidth}x$actualHeight) at ($finalX, $finalY) on image(${cameraWidth}x$cameraHeight)');
@@ -537,7 +614,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         return cameraImagePath;
       }
 
-      // 13. Safe ROI extraction với validation
+      // 18. Safe ROI extraction với validation
       try {
         // OpenCV uses row-first indexing: rows = Y axis, cols = X axis
         final roiStartRow = finalY;
@@ -601,7 +678,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         return cameraImagePath;
       }
 
-      // 14. Encode and save merged image (use oriented camera mat)
+      // 19. Encode and save merged image (use oriented camera mat)
       Logger.log('💾 Encoding merged image...');
       final (success, encoded) = cv.imencode('.jpg', orientedCameraMat);
 
@@ -711,12 +788,15 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           child: GestureDetector(
             onScaleStart: _handleScaleStart,
             onScaleUpdate: _handleScaleUpdate,
-            child: FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: _controller!.value.previewSize!.height,
-                height: _controller!.value.previewSize!.width,
-                child: CameraPreview(_controller!),
+            child: Container(
+              key: _previewKey, // Key để lấy actual screen size
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller!.value.previewSize!.height,
+                  height: _controller!.value.previewSize!.width,
+                  child: CameraPreview(_controller!),
+                ),
               ),
             ),
           ),

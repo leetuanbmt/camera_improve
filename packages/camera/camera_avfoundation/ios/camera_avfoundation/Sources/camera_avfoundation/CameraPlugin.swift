@@ -123,7 +123,7 @@ public final class CameraPlugin: NSObject, FlutterPlugin {
   }
 }
 
-extension CameraPlugin: FCPCameraApi {
+@objc extension CameraPlugin: FCPCameraApi {
   public func availableCameras(
     completion: @escaping ([FCPPlatformCameraDescription]?, FlutterError?) -> Void
   ) {
@@ -342,7 +342,7 @@ extension CameraPlugin: FCPCameraApi {
     }
   }
 
-  public func lockCapture(
+    public func lockCapture(
     _ orientation: FCPPlatformDeviceOrientation,
     completion: @escaping (FlutterError?) -> Void
   ) {
@@ -362,6 +362,45 @@ extension CameraPlugin: FCPCameraApi {
   public func takePicture(completion: @escaping (String?, FlutterError?) -> Void) {
     captureSessionQueue.async { [weak self] in
       self?.camera?.captureToFile(completion: completion)
+    }
+  }
+
+  public func capture(toMemory completion: @escaping (FCPPlatformCapturedImageData?, FlutterError?) -> Void) {
+    captureSessionQueue.async { [weak self] in
+      self?.sessionQueueCaptureToMemory(completion: completion)
+    }
+  }
+  
+  // This must be called on captureSessionQueue. It is extracted from capture(toMemory:) to make it
+  // easier to reason about strong/weak self pointers.
+  private func sessionQueueCaptureToMemory(completion: @escaping (FCPPlatformCapturedImageData?, FlutterError?) -> Void) {
+    guard let camera = camera else {
+      completion(nil, FlutterError(code: "CameraNotInitialized", message: "Camera is not initialized", details: nil))
+      return
+    }
+    camera.captureToMemory { data, width, height, error in
+      if let error = error {
+        completion(nil, error)
+      } else if let data = data {
+        // Optimize byte array conversion: Pre-allocate array and use withUnsafeBytes
+        // This avoids multiple allocations and is much faster than map
+        let count = data.count
+        var bytes = [NSNumber](repeating: NSNumber(value: 0), count: count)
+        data.withUnsafeBytes { buffer in
+          let pointer = buffer.bindMemory(to: UInt8.self)
+          for i in 0..<count {
+            bytes[i] = NSNumber(value: Int(pointer[i]))
+          }
+        }
+        let platformData = FCPPlatformCapturedImageData.make(
+          withBytes: bytes,
+          width: Int(width),
+          height: Int(height)
+        )
+        completion(platformData, nil)
+      } else {
+        completion(nil, FlutterError(code: "NoData", message: "No image data returned", details: nil))
+      }
     }
   }
 

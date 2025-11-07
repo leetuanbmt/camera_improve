@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -131,6 +132,19 @@ abstract class CameraPlatform extends PlatformInterface {
   /// Captures an image and returns the file where it was saved.
   Future<XFile> takePicture(int cameraId) {
     throw UnimplementedError('takePicture() is not implemented.');
+  }
+
+  /// Captures a picture directly to memory as JPEG format.
+  /// Returns the image data as bytes without saving to a temporary file.
+  ///
+  /// The image is captured at the camera's current resolution and compressed
+  /// as JPEG. Orientation is automatically handled based on the device's
+  /// current orientation.
+  ///
+  /// Returns a [CapturedImageData] containing the JPEG bytes and the image
+  /// dimensions (width and height).
+  Future<CapturedImageData> captureToMemory(int cameraId) {
+    throw UnimplementedError('captureToMemory() is not implemented.');
   }
 
   /// Prepare the capture session for video recording.

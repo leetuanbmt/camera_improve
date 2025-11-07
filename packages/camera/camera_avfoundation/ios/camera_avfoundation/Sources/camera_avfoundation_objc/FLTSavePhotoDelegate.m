@@ -37,9 +37,19 @@
     if (!strongSelf) return;
 
     NSObject<FLTWritableData> *data = photoDataProvider();
+    if (!data) {
+      NSError *dataError = [NSError errorWithDomain:@"FLTSavePhotoDelegate"
+                                               code:-1
+                                           userInfo:@{NSLocalizedDescriptionKey : @"Photo data provider returned nil"}];
+      strongSelf.completionHandler(nil, dataError);
+      return;
+    }
+    
     NSError *ioError;
+    // Use NSDataWritingAtomic for safety, but this is already optimal for file I/O
+    // The main performance is in the camera capture itself, not file writing
     if ([data writeToFile:strongSelf.path options:NSDataWritingAtomic error:&ioError]) {
-      strongSelf.completionHandler(self.path, nil);
+      strongSelf.completionHandler(strongSelf.path, nil);
     } else {
       strongSelf.completionHandler(nil, ioError);
     }

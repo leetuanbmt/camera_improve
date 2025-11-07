@@ -312,6 +312,42 @@ class CameraController extends ValueNotifier<CameraValue> {
     return file;
   }
 
+  /// Captures a picture directly to memory as JPEG format.
+  /// Returns the image data as bytes without saving to a temporary file.
+  ///
+  /// The image is captured at the camera's current resolution and compressed
+  /// as JPEG. Orientation is automatically handled based on the device's
+  /// current orientation.
+  ///
+  /// Returns a [CapturedImageData] containing the JPEG bytes and the image
+  /// dimensions (width and height).
+  ///
+  /// Throws a [CameraException] if the capture fails.
+  Future<CapturedImageData> captureToMemory() async {
+    if (value.isTakingPicture) {
+      throw CameraException(
+        'Previous capture has not returned yet.',
+        'captureToMemory was called before the previous capture returned.',
+      );
+    }
+    try {
+      value = value.copyWith(isTakingPicture: true);
+      final CapturedImageData result =
+          await CameraPlatform.instance.captureToMemory(_cameraId);
+      value = value.copyWith(isTakingPicture: false);
+      return result;
+    } on PlatformException catch (e) {
+      value = value.copyWith(isTakingPicture: false);
+      throw CameraException(e.code, e.message);
+    } on UnimplementedError catch (e) {
+      value = value.copyWith(isTakingPicture: false);
+      throw CameraException(
+        'UnsupportedPlatform',
+        'captureToMemory is not supported on this platform. ${e.message}',
+      );
+    }
+  }
+
   /// Start streaming images from platform camera.
   Future<void> startImageStream(
       void Function(CameraImageData image) onAvailable) async {

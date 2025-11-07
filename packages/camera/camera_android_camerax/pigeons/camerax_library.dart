@@ -18,6 +18,7 @@ import 'package:pigeon/pigeon.dart';
     ),
   ),
 )
+
 /// Immutable class for describing width and height dimensions in pixels.
 ///
 /// See https://developer.android.com/reference/android/util/Size.html.
@@ -46,6 +47,19 @@ abstract class CameraSize {
 abstract class ResolutionInfo {
   /// Returns the output resolution used for the use case.
   late CameraSize resolution;
+}
+
+/// Pigeon version of CapturedImageData.
+class PlatformCapturedImageData {
+  PlatformCapturedImageData({
+    required this.bytes,
+    required this.width,
+    required this.height,
+  });
+
+  final List<int> bytes;
+  final int width;
+  final int height;
 }
 
 /// Generally classifies the overall set of the camera device functionality.
@@ -588,6 +602,15 @@ abstract class ImageCapture extends UseCase {
   /// Captures a new still image for in memory access.
   @async
   String takePicture();
+
+  /// Captures a picture directly to memory as JPEG format.
+  /// Returns the image data as bytes without saving to a temporary file.
+  ///
+  /// The image is captured at the camera's current resolution and compressed
+  /// as JPEG. Orientation is automatically handled based on the device's
+  /// current orientation.
+  @async
+  PlatformCapturedImageData captureToMemory();
 
   /// Sets the desired rotation of the output image.
   void setTargetRotation(int rotation);

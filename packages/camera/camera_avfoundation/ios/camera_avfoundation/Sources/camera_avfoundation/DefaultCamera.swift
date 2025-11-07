@@ -449,4 +449,13 @@ final class DefaultCamera: FLTCam, Camera {
       }
     }
   }
+
+  func captureToMemory(
+    completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
+  ) {
+    // Call the Objective-C method from FLTCam
+    (self as FLTCam).captureToMemory(completion: { data, width, height, error in
+      completion(data, Int(width), Int(height), error)
+    })
+  }
 }

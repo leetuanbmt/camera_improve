@@ -135,6 +135,12 @@ class FakeController extends ValueNotifier<CameraValue>
 
   @override
   bool supportsImageStreaming() => true;
+
+  @override
+  Future<CapturedImageData> captureToMemory() {
+    // TODO: implement captureToMemory
+    throw UnimplementedError();
+  }
 }
 
 void main() {

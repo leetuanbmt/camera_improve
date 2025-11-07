@@ -81,6 +81,19 @@ class PlatformPoint {
   final double y;
 }
 
+/// Pigeon version of CapturedImageData.
+class PlatformCapturedImageData {
+  PlatformCapturedImageData({
+    required this.bytes,
+    required this.width,
+    required this.height,
+  });
+
+  final Uint8List bytes;
+  final int width;
+  final int height;
+}
+
 /// Pigeon equivalent of [ResolutionPreset].
 enum PlatformResolutionPreset {
   low,
@@ -225,6 +238,15 @@ abstract class CameraApi {
   ///
   /// This should be called only while video recording is active.
   void setDescriptionWhileRecording(String description);
+
+  /// Captures a picture directly to memory as JPEG format.
+  /// Returns the image data as bytes without saving to a temporary file.
+  ///
+  /// The image is captured at the camera's current resolution and compressed
+  /// as JPEG. Orientation is automatically handled based on the device's
+  /// current orientation.
+  @async
+  PlatformCapturedImageData captureToMemory();
 }
 
 /// Handles calls from native side to Dart that are not camera-specific.

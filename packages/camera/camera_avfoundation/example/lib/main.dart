@@ -1,7 +1,7 @@
 // Copyright 2013 The Flutter Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
+import 'dart:developer' as developer;
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -14,6 +14,12 @@ import 'package:video_player/video_player.dart';
 
 import 'camera_controller.dart';
 import 'camera_preview.dart';
+
+class Logger {
+  static log(Object? message) {
+    developer.log(message.toString());
+  }
+}
 
 /// Camera example home widget.
 class CameraExampleHome extends StatefulWidget {
@@ -639,7 +645,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
       CameraDescription cameraDescription) async {
     final CameraController cameraController = CameraController(
       cameraDescription,
-      kIsWeb ? ResolutionPreset.max : ResolutionPreset.medium,
+      ResolutionPreset.max,
       enableAudio: enableAudio,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -1026,8 +1032,9 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     }
 
     try {
-      final XFile file = await cameraController.takePicture();
-      return file;
+      final Stopwatch stopwatch = Stopwatch()..start();
+      final data = await cameraController.captureToMemory();
+      Logger.log('takePicture took ${stopwatch.elapsedMilliseconds} ms');
     } on CameraException catch (e) {
       _showCameraException(e);
       return null;

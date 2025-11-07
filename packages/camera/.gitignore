@@ -1,0 +1,47 @@
+# Dart/Pub
+.dart_tool/
+.packages
+pubspec.lock
+build/
+generated_plugin_registrant.dart
+
+# Flutter
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+.flutter-*
+.idea/
+android/.gradle/
+ios/Pods/
+macos/Pods/
+*.iml
+
+# VS Code
+.vscode/
+
+# Xcode
+ios/Runner.xcworkspace/
+ios/Pods/
+ios/Podfile.lock
+
+# Misc
+*.log
+*.tmp
+
+# Apks, ipa output
+*.apk
+*.ipa
+
+# Images/thumbnails/previews
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.heic
+
+# Opencv/Temp
+opencv_temp/
+opencv_cache/
+
+**build/**

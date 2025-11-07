@@ -60,6 +60,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setDeviceOrientation:(UIDeviceOrientation)orientation;
 - (void)captureToFileWithCompletion:(void (^)(NSString *_Nullable,
                                               FlutterError *_Nullable))completion;
+- (void)captureToMemoryWithCompletion:(void (^)(NSData *_Nullable, int width, int height, FlutterError *_Nullable))completion;
 - (void)setImageFileFormat:(FCPPlatformImageFileFormat)fileFormat;
 /// Starts recording a video with an optional streaming messenger.
 /// If the messenger is non-nil then it will be called for each

@@ -249,6 +249,16 @@ class MethodChannelCamera extends CameraPlatform {
   }
 
   @override
+  Future<CapturedImageData> captureToMemory(int cameraId) async {
+    // This method is implemented by platform-specific implementations.
+    // MethodChannelCamera is the default fallback, but Android and iOS
+    // should override this method.
+    throw UnimplementedError(
+      'captureToMemory() is not implemented on this platform.',
+    );
+  }
+
+  @override
   Future<void> prepareForVideoRecording() =>
       _channel.invokeMethod<void>('prepareForVideoRecording');
 

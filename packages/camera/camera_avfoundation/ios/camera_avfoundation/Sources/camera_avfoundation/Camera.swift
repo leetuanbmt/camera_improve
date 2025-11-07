@@ -60,6 +60,9 @@ protocol Camera: FlutterTexture, AVCaptureVideoDataOutputSampleBufferDelegate,
   func stopVideoRecording(completion: @escaping (_ path: String?, _ error: FlutterError?) -> Void)
 
   func captureToFile(completion: @escaping (_ path: String?, _ error: FlutterError?) -> Void)
+  func captureToMemory(
+    completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
+  )
 
   func setDeviceOrientation(_ orientation: UIDeviceOrientation)
   func lockCaptureOrientation(_ orientation: FCPPlatformDeviceOrientation)

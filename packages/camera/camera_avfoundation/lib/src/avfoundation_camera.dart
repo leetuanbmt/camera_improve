@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/material.dart';
@@ -195,6 +196,21 @@ class AVFoundationCamera extends CameraPlatform {
   Future<XFile> takePicture(int cameraId) async {
     final String path = await _hostApi.takePicture();
     return XFile(path);
+  }
+
+  @override
+  Future<CapturedImageData> captureToMemory(int cameraId) async {
+    try {
+      final PlatformCapturedImageData platformData =
+          await _hostApi.captureToMemory();
+      return CapturedImageData(
+        bytes: Uint8List.fromList(platformData.bytes),
+        width: platformData.width,
+        height: platformData.height,
+      );
+    } on PlatformException catch (e) {
+      throw CameraException(e.code, e.message);
+    }
   }
 
   @override

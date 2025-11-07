@@ -10,6 +10,7 @@
 #import "FLTDeviceOrientationProviding.h"
 #import "FLTImageStreamHandler.h"
 #import "FLTSavePhotoDelegate.h"
+#import "FLTCaptureToMemoryDelegate.h"
 
 // APIs exposed for unit testing.
 @interface FLTCam ()
@@ -23,13 +24,13 @@
 /// True when images from the camera are being streamed.
 @property(assign, nonatomic) BOOL isStreamingImages;
 
-/// A dictionary to retain all in-progress FLTSavePhotoDelegates. The key of the dictionary is the
+/// A dictionary to retain all in-progress photo capture delegates. The key of the dictionary is the
 /// AVCapturePhotoSettings's uniqueID for each photo capture operation, and the value is the
-/// FLTSavePhotoDelegate that handles the result of each photo capture operation. Note that photo
+/// delegate (either FLTSavePhotoDelegate or FLTCaptureToMemoryDelegate) that handles the result of each photo capture operation. Note that photo
 /// capture operations may overlap, so FLTCam has to keep track of multiple delegates in progress,
 /// instead of just a single delegate reference.
 @property(readonly, nonatomic)
-    NSMutableDictionary<NSNumber *, FLTSavePhotoDelegate *> *inProgressSavePhotoDelegates;
+    NSMutableDictionary<NSNumber *, id<AVCapturePhotoCaptureDelegate>> *inProgressSavePhotoDelegates;
 
 /// Start streaming images.
 - (void)startImageStreamWithMessenger:(NSObject<FlutterBinaryMessenger> *)messenger

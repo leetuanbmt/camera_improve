@@ -152,6 +152,19 @@ class PlatformSize {
   final double height;
 }
 
+// Pigeon version of CapturedImageData.
+class PlatformCapturedImageData {
+  PlatformCapturedImageData({
+    required this.bytes,
+    required this.width,
+    required this.height,
+  });
+
+  final List<int> bytes;
+  final int width;
+  final int height;
+}
+
 @HostApi()
 abstract class CameraApi {
   /// Returns the list of available cameras.
@@ -207,6 +220,16 @@ abstract class CameraApi {
   /// resulting file.
   @async
   String takePicture();
+
+  /// Captures a picture directly to memory as JPEG format.
+  /// Returns the image data as bytes without saving to a temporary file.
+  ///
+  /// The image is captured at the camera's current resolution and compressed
+  /// as JPEG. Orientation is automatically handled based on the device's
+  /// current orientation.
+  @async
+  @ObjCSelector('captureToMemory')
+  PlatformCapturedImageData captureToMemory();
 
   /// Does any preprocessing necessary before beginning to record video.
   @async

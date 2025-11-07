@@ -24,8 +24,7 @@ if (flutterVersionName == null) {
 
 android {
     namespace 'io.flutter.plugins.cameraexample'
-    compileSdk = flutter.compileSdkVersion
-
+    compileSdk = 36
 
     defaultConfig {
         applicationId "io.flutter.plugins.cameraexample"
@@ -49,6 +48,16 @@ android {
     lint {
         disable 'InvalidPackage'
     }
+
+    // Ensure both Java and Kotlin use the same target compatibility
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 flutter {

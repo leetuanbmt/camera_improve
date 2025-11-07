@@ -176,6 +176,11 @@ final class CameraApiImpl implements Messages.CameraApi {
   }
 
   @Override
+  public void captureToMemory(@NonNull Messages.Result<Messages.PlatformCapturedImageData> result) {
+    camera.captureToMemory(result);
+  }
+
+  @Override
   public void startVideoRecording(@NonNull Boolean enableStream) {
     camera.startVideoRecording(enableStream ? imageStreamChannel : null);
   }

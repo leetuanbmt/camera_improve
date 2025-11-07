@@ -1,7 +1,7 @@
 // Copyright 2013 The Flutter Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
+import 'dart:developer' as developer;
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -14,6 +14,12 @@ import 'package:video_player/video_player.dart';
 
 import 'camera_controller.dart';
 import 'camera_preview.dart';
+
+class Logger {
+  static log(Object? message) {
+    developer.log(message.toString());
+  }
+}
 
 /// Camera example home widget.
 class CameraExampleHome extends StatefulWidget {
@@ -133,40 +139,42 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
       appBar: AppBar(
         title: const Text('Camera example'),
       ),
-      body: Column(
-        children: <Widget>[
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black,
-                border: Border.all(
-                  color:
-                      controller != null && controller!.value.isRecordingVideo
-                          ? Colors.redAccent
-                          : Colors.grey,
-                  width: 3.0,
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  border: Border.all(
+                    color:
+                        controller != null && controller!.value.isRecordingVideo
+                            ? Colors.redAccent
+                            : Colors.grey,
+                    width: 3.0,
+                  ),
                 ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(1.0),
-                child: Center(
-                  child: _cameraPreviewWidget(),
+                child: Padding(
+                  padding: const EdgeInsets.all(1.0),
+                  child: Center(
+                    child: _cameraPreviewWidget(),
+                  ),
                 ),
               ),
             ),
-          ),
-          _captureControlRowWidget(),
-          _modeControlRowWidget(),
-          Padding(
-            padding: const EdgeInsets.all(5.0),
-            child: Row(
-              children: <Widget>[
-                _cameraTogglesRowWidget(),
-                _thumbnailWidget(),
-              ],
+            _captureControlRowWidget(),
+            _modeControlRowWidget(),
+            Padding(
+              padding: const EdgeInsets.all(5.0),
+              child: Row(
+                children: <Widget>[
+                  _cameraTogglesRowWidget(),
+                  _thumbnailWidget(),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -638,9 +646,8 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     final CameraController cameraController = CameraController(
       cameraDescription,
       mediaSettings: MediaSettings(
-        resolutionPreset:
-            kIsWeb ? ResolutionPreset.max : ResolutionPreset.medium,
-        enableAudio: enableAudio,
+        resolutionPreset: ResolutionPreset.max,
+        enableAudio: false,
       ),
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -1027,8 +1034,20 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     }
 
     try {
-      final XFile file = await cameraController.takePicture();
-      return file;
+      final stopwatch = Stopwatch()..start();
+      final data = await cameraController.captureToMemory();
+      Logger.log('captureToMemory took ${stopwatch.elapsedMilliseconds} ms');
+      print('data: ${data.width}');
+      print('data: ${data.height}');
+      showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text('Picture'),
+              content: Image.memory(data.bytes),
+            );
+          });
+      return null;
     } on CameraException catch (e) {
       _showCameraException(e);
       return null;

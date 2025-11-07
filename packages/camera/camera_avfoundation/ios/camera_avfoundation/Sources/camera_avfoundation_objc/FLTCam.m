@@ -16,6 +16,7 @@
 #import "./include/camera_avfoundation/FLTFormatUtils.h"
 #import "./include/camera_avfoundation/FLTImageStreamHandler.h"
 #import "./include/camera_avfoundation/FLTSavePhotoDelegate.h"
+#import "./include/camera_avfoundation/FLTCaptureToMemoryDelegate.h"
 #import "./include/camera_avfoundation/FLTThreadSafeEventChannel.h"
 #import "./include/camera_avfoundation/QueueUtils.h"
 #import "./include/camera_avfoundation/messages.g.h"
@@ -302,6 +303,45 @@ NSString *const errorMethod = @"error";
            @"save photo delegate references must be updated on the capture session queue");
   self.inProgressSavePhotoDelegates[@(settings.uniqueID)] = savePhotoDelegate;
   [self.capturePhotoOutput capturePhotoWithSettings:settings delegate:savePhotoDelegate];
+}
+
+- (void)captureToMemoryWithCompletion:(void (^)(NSData *_Nullable, int width, int height, FlutterError *_Nullable))completion {
+  AVCapturePhotoSettings *settings = [AVCapturePhotoSettings photoSettings];
+
+  // Force JPEG format for memory capture (no HEIF)
+  NSString *extension = @"jpg";
+
+  // If the flash is in torch mode, no capture-level flash setting is needed.
+  if (self.flashMode != FCPPlatformFlashModeTorch) {
+    [settings setFlashMode:FCPGetAVCaptureFlashModeForPigeonFlashMode(self.flashMode)];
+  }
+
+  __weak typeof(self) weakSelf = self;
+  FLTCaptureToMemoryDelegate *captureDelegate = [[FLTCaptureToMemoryDelegate alloc]
+           initWithIOQueue:self.photoIOQueue
+             completionHandler:^(NSData *_Nullable data, int width, int height, NSError *_Nullable error) {
+        typeof(self) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        dispatch_async(strongSelf.captureSessionQueue, ^{
+          // cannot use the outter `strongSelf`
+          typeof(self) strongSelf = weakSelf;
+          if (!strongSelf) return;
+          [strongSelf.inProgressSavePhotoDelegates removeObjectForKey:@(settings.uniqueID)];
+        });
+
+        if (error) {
+          completion(nil, 0, 0, FlutterErrorFromNSError(error));
+        } else {
+          NSAssert(data, @"Data must not be nil if no error.");
+          completion(data, width, height, nil);
+        }
+      }];
+
+  NSAssert(dispatch_get_specific(FLTCaptureSessionQueueSpecific),
+           @"capture to memory delegate references must be updated on the capture session queue");
+  // Store the delegate in the same dictionary (it's only used to track by uniqueID)
+  self.inProgressSavePhotoDelegates[@(settings.uniqueID)] = captureDelegate;
+  [self.capturePhotoOutput capturePhotoWithSettings:settings delegate:captureDelegate];
 }
 
 - (AVCaptureVideoOrientation)getVideoOrientationForDeviceOrientation:

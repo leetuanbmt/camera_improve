@@ -5,8 +5,8 @@ issue_tracker: https://github.com/flutter/flutter/issues?q=is%3Aissue+is%3Aopen+
 version: 0.6.19
 
 environment:
-  sdk: ^3.7.0
-  flutter: ">=3.29.0"
+  sdk: ^3.6.0
+  flutter: ">=3.27.0"
 
 flutter:
   plugin:
@@ -19,7 +19,8 @@ flutter:
 
 dependencies:
   async: ^2.5.0
-  camera_platform_interface: ^2.9.0
+  camera_platform_interface:
+    path: ../camera_platform_interface
   flutter:
     sdk: flutter
   meta: ^1.7.0

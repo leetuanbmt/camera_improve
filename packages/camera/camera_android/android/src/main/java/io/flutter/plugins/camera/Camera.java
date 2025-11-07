@@ -136,6 +136,7 @@ class Camera
   private CameraCaptureProperties captureProps;
 
   Messages.Result<String> flutterResult;
+  Messages.Result<Messages.PlatformCapturedImageData> flutterResultMemory;
 
   /** A CameraDeviceWrapper implementation that forwards calls to a CameraDevice. */
   private class DefaultCameraDeviceWrapper implements CameraDeviceWrapper {
@@ -236,7 +237,11 @@ class Camera
 
   @Override
   public void onConverged() {
-    takePictureAfterPrecapture();
+    if (flutterResultMemory != null) {
+      captureToMemoryAfterPrecapture();
+    } else {
+      takePictureAfterPrecapture();
+    }
   }
 
   @Override
@@ -624,6 +629,7 @@ class Camera
     }
 
     flutterResult = result;
+    flutterResultMemory = null;
 
     // Create temporary file.
     final File outputDir = applicationContext.getCacheDir();
@@ -634,6 +640,31 @@ class Camera
       dartMessenger.error(flutterResult, "cannotCreateFile", e.getMessage(), null);
       return;
     }
+
+    // Listen for picture being taken.
+    pictureImageReader.setOnImageAvailableListener(this, backgroundHandler);
+
+    final AutoFocusFeature autoFocusFeature = cameraFeatures.getAutoFocus();
+    final boolean isAutoFocusSupported = autoFocusFeature.checkIsSupported();
+    if (isAutoFocusSupported && autoFocusFeature.getValue() == FocusMode.auto) {
+      runPictureAutoFocus();
+    } else {
+      runPrecaptureSequence();
+    }
+  }
+
+  public void captureToMemory(@NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
+    // Only take one picture at a time.
+    if (cameraCaptureCallback.getCameraState() != CameraState.STATE_PREVIEW) {
+      result.error(
+          new Messages.FlutterError(
+              "captureAlreadyActive", "Picture is currently already being captured", null));
+      return;
+    }
+
+    flutterResultMemory = result;
+    flutterResult = null;
+    captureFile = null;
 
     // Listen for picture being taken.
     pictureImageReader.setOnImageAvailableListener(this, backgroundHandler);
@@ -736,6 +767,63 @@ class Camera
       captureSession.capture(stillBuilder.build(), captureCallback, backgroundHandler);
     } catch (CameraAccessException e) {
       dartMessenger.error(flutterResult, "cameraAccess", e.getMessage(), null);
+    }
+  }
+
+  /**
+   * Capture a still picture to memory. This method should be called when a response is received
+   * {@link #cameraCaptureCallback} from both lockFocus().
+   */
+  private void captureToMemoryAfterPrecapture() {
+    Log.i(TAG, "captureStillPictureToMemory");
+    cameraCaptureCallback.setCameraState(CameraState.STATE_CAPTURING);
+
+    if (cameraDevice == null) {
+      return;
+    }
+    // This is the CaptureRequest.Builder that is used to take a picture.
+    CaptureRequest.Builder stillBuilder;
+    try {
+      stillBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+    } catch (CameraAccessException e) {
+      dartMessenger.error(flutterResultMemory, "cameraAccess", e.getMessage(), null);
+      return;
+    }
+    stillBuilder.addTarget(pictureImageReader.getSurface());
+
+    // Zoom.
+    stillBuilder.set(
+        CaptureRequest.SCALER_CROP_REGION,
+        previewRequestBuilder.get(CaptureRequest.SCALER_CROP_REGION));
+
+    // Have all features update the builder.
+    updateBuilderSettings(stillBuilder);
+
+    // Orientation - same as takePicture to ensure correct orientation.
+    final PlatformChannel.DeviceOrientation lockedOrientation =
+        cameraFeatures.getSensorOrientation().getLockedCaptureOrientation();
+    stillBuilder.set(
+        CaptureRequest.JPEG_ORIENTATION,
+        lockedOrientation == null
+            ? getDeviceOrientationManager().getPhotoOrientation()
+            : getDeviceOrientationManager().getPhotoOrientation(lockedOrientation));
+
+    CameraCaptureSession.CaptureCallback captureCallback =
+        new CameraCaptureSession.CaptureCallback() {
+          @Override
+          public void onCaptureCompleted(
+              @NonNull CameraCaptureSession session,
+              @NonNull CaptureRequest request,
+              @NonNull TotalCaptureResult result) {
+            unlockAutoFocus();
+          }
+        };
+
+    try {
+      Log.i(TAG, "sending capture to memory request");
+      captureSession.capture(stillBuilder.build(), captureCallback, backgroundHandler);
+    } catch (CameraAccessException e) {
+      dartMessenger.error(flutterResultMemory, "cameraAccess", e.getMessage(), null);
     }
   }
 
@@ -1248,21 +1336,46 @@ class Camera
       return;
     }
 
-    backgroundHandler.post(
-        new ImageSaver(
-            image,
-            captureFile,
-            new ImageSaver.Callback() {
-              @Override
-              public void onComplete(@NonNull String absolutePath) {
-                dartMessenger.finish(flutterResult, absolutePath);
-              }
+    if (flutterResultMemory != null) {
+      // Capture to memory
+      backgroundHandler.post(
+          new ImageMemoryProcessor(
+              image,
+              new ImageMemoryProcessor.Callback() {
+                @Override
+                public void onComplete(@NonNull byte[] bytes, int width, int height) {
+                  Messages.PlatformCapturedImageData result = new Messages.PlatformCapturedImageData();
+                  result.setBytes(bytes);
+                  result.setWidth((long) width);
+                  result.setHeight((long) height);
+                  dartMessenger.finish(flutterResultMemory, result);
+                }
 
-              @Override
-              public void onError(@NonNull String errorCode, @NonNull String errorMessage) {
-                dartMessenger.error(flutterResult, errorCode, errorMessage, null);
-              }
-            }));
+                @Override
+                public void onError(@NonNull String errorCode, @NonNull String errorMessage) {
+                  dartMessenger.error(flutterResultMemory, errorCode, errorMessage, null);
+                }
+              },
+              true // Skip orientation correction - JPEG already has correct EXIF orientation
+              ));
+    } else {
+      // Capture to file
+      backgroundHandler.post(
+          new ImageSaver(
+              image,
+              captureFile,
+              new ImageSaver.Callback() {
+                @Override
+                public void onComplete(@NonNull String absolutePath) {
+                  dartMessenger.finish(flutterResult, absolutePath);
+                }
+
+                @Override
+                public void onError(@NonNull String errorCode, @NonNull String errorMessage) {
+                  dartMessenger.error(flutterResult, errorCode, errorMessage, null);
+                }
+              }));
+    }
     cameraCaptureCallback.setCameraState(CameraState.STATE_PREVIEW);
   }
 

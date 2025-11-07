@@ -174,7 +174,14 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         _isProcessing = false;
       });
 
+      // Get file size
+      final imageFile = File(finalImagePath!);
+      final fileSizeBytes = await imageFile.length();
+      final fileSizeMB = fileSizeBytes / (1024 * 1024);
+
       Logger.log('📸 Final image: $finalImagePath');
+      Logger.log(
+          '💾 Image size: ${fileSizeMB.toStringAsFixed(2)} MB (${fileSizeBytes} bytes)');
       Logger.log('⏱️ TOTAL TIME: ${stopwatch.elapsedMilliseconds}ms');
       Logger.log('═══════════════════════════════════════');
     } catch (e) {

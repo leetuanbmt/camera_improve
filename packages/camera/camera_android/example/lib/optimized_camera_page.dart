@@ -80,6 +80,10 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   @override
   void initState() {
     super.initState();
+    // Lock device orientation to portrait (screen không xoay)
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
     _initializeCamera();
     _boardPosition = const Offset(20, 100);
     _boardSize = const Size(300, 200);
@@ -88,6 +92,13 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
   @override
   void dispose() {
+    // Restore all orientations
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     _accelerometerSubscription?.cancel();
     _controller?.dispose();
     super.dispose();
@@ -477,7 +488,8 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       Logger.log(
           '📐 Board widget size (logical pixels): ${boardWidgetWidth.toStringAsFixed(1)}x${boardWidgetHeight.toStringAsFixed(1)}');
 
-      // 8. Get actual preview screen size (rendered on screen)
+      // 8. Simplified coordinate mapping (no FittedBox scaling)
+      // Camera preview now renders directly, screen coords = preview coords
       final renderBox =
           _previewKey.currentContext?.findRenderObject() as RenderBox?;
       if (renderBox == null) {
@@ -487,107 +499,43 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
       final previewScreenSize = renderBox.size;
       Logger.log(
-          '📺 Preview screen size (container): ${previewScreenSize.width.toStringAsFixed(1)}x${previewScreenSize.height.toStringAsFixed(1)}');
+          '📺 Preview screen size: ${previewScreenSize.width.toStringAsFixed(1)}x${previewScreenSize.height.toStringAsFixed(1)}');
 
-      // 9. Calculate BoxFit.cover scaling and offset
-      // Preview native size (what FittedBox is trying to fit)
-      final nativeWidth = previewWidth;
-      final nativeHeight = previewHeight;
-
-      Logger.log(
-          '📺 Preview native size: ${nativeWidth.toStringAsFixed(1)}x${nativeHeight.toStringAsFixed(1)}');
-
-      // Calculate scale for BoxFit.cover (fill container, crop excess)
-      final scaleToFitWidth = previewScreenSize.width / nativeWidth;
-      final scaleToFitHeight = previewScreenSize.height / nativeHeight;
-      final fitScale =
-          math.max(scaleToFitWidth, scaleToFitHeight); // cover uses max
+      // Direct scale factors: screen → camera image
+      final scaleX = cameraWidth / previewScreenSize.width;
+      final scaleY = cameraHeight / previewScreenSize.height;
 
       Logger.log(
-          '📐 BoxFit.cover scale: ${fitScale.toStringAsFixed(3)} (width: ${scaleToFitWidth.toStringAsFixed(3)}, height: ${scaleToFitHeight.toStringAsFixed(3)})');
+          '📊 Scale factors (screen→image): X=${scaleX.toStringAsFixed(2)}, Y=${scaleY.toStringAsFixed(2)}');
 
-      // Calculate actual rendered size after scaling (before crop)
-      final renderedWidth = nativeWidth * fitScale;
-      final renderedHeight = nativeHeight * fitScale;
-
-      Logger.log(
-          '📏 Rendered size (before crop): ${renderedWidth.toStringAsFixed(1)}x${renderedHeight.toStringAsFixed(1)}');
-
-      // Calculate crop offset (BoxFit.cover centers the content)
-      final offsetX = (renderedWidth - previewScreenSize.width) / 2;
-      final offsetY = (renderedHeight - previewScreenSize.height) / 2;
-
-      Logger.log(
-          '✂️ Crop offset: X=${offsetX.toStringAsFixed(1)}, Y=${offsetY.toStringAsFixed(1)}');
-
-      // 10. Calculate scale factors từ preview screen → camera image
-      // Cần map từ: board screen position → preview native position → camera image
-      final scaleX = cameraWidth / nativeWidth;
-      final scaleY = cameraHeight / nativeHeight;
-
-      Logger.log(
-          '📊 Scale factors (native→image): X=${scaleX.toStringAsFixed(2)}, Y=${scaleY.toStringAsFixed(2)}');
-
-      // 11. Map board position từ screen coordinates → image coordinates
-      // Step 1: Add crop offset to get position on rendered preview (before crop)
-      final posOnRenderedX = _boardPosition.dx + offsetX;
-      final posOnRenderedY = _boardPosition.dy + offsetY;
-
-      Logger.log(
-          '📍 Board position on rendered preview: (${posOnRenderedX.toStringAsFixed(1)}, ${posOnRenderedY.toStringAsFixed(1)})');
-
-      // Step 2: Scale down to native preview coordinates
-      final posOnNativeX = posOnRenderedX / fitScale;
-      final posOnNativeY = posOnRenderedY / fitScale;
-
-      Logger.log(
-          '📍 Board position on native preview: (${posOnNativeX.toStringAsFixed(1)}, ${posOnNativeY.toStringAsFixed(1)})');
-
-      // Step 3: Scale up to camera image coordinates
-      var imageBoardX = (posOnNativeX * scaleX).toInt();
-      var imageBoardY = (posOnNativeY * scaleY).toInt();
+      // 9. Map board position: screen coords → image coords (direct mapping)
+      var imageBoardX = (_boardPosition.dx * scaleX).toInt();
+      var imageBoardY = (_boardPosition.dy * scaleY).toInt();
 
       Logger.log('🎯 Board position on image: ($imageBoardX, $imageBoardY)');
 
-      // 12. Scale board size để match với image resolution
-      // Board widget on screen → native preview size → image size
-      // Step 1: Convert board widget size to native preview size
-      final boardOnNativeWidth = boardWidgetWidth / fitScale;
-      final boardOnNativeHeight = boardWidgetHeight / fitScale;
-
-      Logger.log(
-          '📐 Board size on native preview: ${boardOnNativeWidth.toStringAsFixed(1)}x${boardOnNativeHeight.toStringAsFixed(1)}');
-
-      // Step 2: Scale to image resolution
-      var scaledBoardWidth = (boardOnNativeWidth * scaleX).toInt();
-      var scaledBoardHeight = (boardOnNativeHeight * scaleY).toInt();
+      // 10. Scale board size: screen size → image size (direct mapping)
+      var scaledBoardWidth = (boardWidgetWidth * scaleX).toInt();
+      var scaledBoardHeight = (boardWidgetHeight * scaleY).toInt();
 
       Logger.log(
           '📏 Board size on image: ${scaledBoardWidth}x$scaledBoardHeight');
 
-      // 13. VALIDATION: Ensure board fits within image after scaling
+      // 11. VALIDATION: Ensure board fits within image after scaling
       if (scaledBoardWidth > cameraWidth || scaledBoardHeight > cameraHeight) {
         Logger.log('⚠️ Board too large after scaling, adjusting...');
 
-        // Calculate maximum allowed size on native preview
-        final maxNativeWidth = cameraWidth / scaleX;
-        final maxNativeHeight = cameraHeight / scaleY;
-
-        // Limit board size on native preview
-        final limitedNativeWidth =
-            math.min(boardOnNativeWidth, maxNativeWidth * 0.95);
-        final limitedNativeHeight =
-            math.min(boardOnNativeHeight, maxNativeHeight * 0.95);
-
-        // Recalculate image size
-        scaledBoardWidth = (limitedNativeWidth * scaleX).toInt();
-        scaledBoardHeight = (limitedNativeHeight * scaleY).toInt();
+        // Clamp to max size
+        scaledBoardWidth =
+            math.min(scaledBoardWidth, (cameraWidth * 0.95).toInt());
+        scaledBoardHeight =
+            math.min(scaledBoardHeight, (cameraHeight * 0.95).toInt());
 
         Logger.log(
             '🔄 Adjusted board size: ${scaledBoardWidth}x$scaledBoardHeight');
       }
 
-      // 14. Convert board to BGR if it has alpha channel
+      // 12. Convert board to BGR if it has alpha channel
       cv.Mat boardBGR = boardMat;
       if (boardMat.channels == 4) {
         Logger.log('🎨 Converting RGBA to BGR...');
@@ -595,7 +543,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('✅ Converted: ${mergeStopwatch.elapsedMilliseconds}ms');
       }
 
-      // 15. Resize board to image resolution scale
+      // 13. Resize board to image resolution scale
       Logger.log(
           '🔧 Resizing board to ${scaledBoardWidth}x$scaledBoardHeight...');
 
@@ -604,7 +552,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           _resizeMat(boardBGR, scaledBoardWidth, scaledBoardHeight);
       Logger.log('✅ Board resized: ${mergeStopwatch.elapsedMilliseconds}ms');
 
-      // 16. CRITICAL: Verify actual dimensions after resize
+      // 14. CRITICAL: Verify actual dimensions after resize
       final actualWidth = scaledBoard.cols; // Width
       final actualHeight = scaledBoard.rows; // Height
 
@@ -627,13 +575,13 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       }
       Logger.log('✅ Dimension and channel verification passed');
 
-      // 17. Clamp position để board không vượt bounds (use actual dimensions)
+      // 15. Clamp position để board không vượt bounds (use actual dimensions)
       final finalX = imageBoardX.clamp(0, cameraWidth - actualWidth);
       final finalY = imageBoardY.clamp(0, cameraHeight - actualHeight);
 
       Logger.log('✅ Final position (clamped): ($finalX, $finalY)');
 
-      // 18. Final bounds validation với actual dimensions
+      // 16. Final bounds validation với actual dimensions
       Logger.log('📋 Preparing to overlay board at ($finalX, $finalY)...');
       Logger.log(
           '🔍 Final bounds check: board(${actualWidth}x$actualHeight) at ($finalX, $finalY) on image(${cameraWidth}x$cameraHeight)');
@@ -649,7 +597,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         return null;
       }
 
-      // 19. Safe ROI extraction với validation
+      // 17. Safe ROI extraction với validation
       try {
         // OpenCV uses row-first indexing: rows = Y axis, cols = X axis
         final roiStartRow = finalY;
@@ -713,7 +661,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         return null;
       }
 
-      // 20. Resize final merged image to target resolution
+      // 18. Resize final merged image to target resolution
       cv.Mat finalMat = orientedCameraMat;
 
       if (finalResizeScale < 1.0) {
@@ -733,7 +681,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('✅ No final resize needed (target >= original)');
       }
 
-      // 21. Encode and save final image
+      // 19. Encode and save final image
       Logger.log(
           '💾 Encoding final image (${finalMat.cols}x${finalMat.rows})...');
       final (success, encoded) = cv.imencode('.jpg', finalMat);
@@ -799,9 +747,12 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // Close Button
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.white, size: 32),
-            onPressed: () => Navigator.of(context).pop(),
+          RotatedBox(
+            quarterTurns: (_currentTurns * 4).round(),
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 32),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
           ),
 
           // Flash Control (Camera mode) or Confirm (Preview mode)
@@ -840,7 +791,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Camera Preview with Pinch to Zoom
+        // Camera Preview with Pinch to Zoom (always full screen, no rotation)
         Listener(
           onPointerDown: (_) => setState(() => _pointers++),
           onPointerUp: (_) => setState(() => _pointers--),
@@ -849,14 +800,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
             onScaleUpdate: _handleScaleUpdate,
             child: Container(
               key: _previewKey, // Key để lấy actual screen size
-              child: FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: _controller!.value.previewSize!.height,
-                  height: _controller!.value.previewSize!.width,
-                  child: CameraPreview(_controller!),
-                ),
-              ),
+              child: CameraPreview(_controller!),
             ),
           ),
         ),
@@ -867,6 +811,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
             screenshotController: _boardScreenshotController,
             initialPosition: _boardPosition,
             initialSize: _boardSize,
+            rotationTurns: _currentTurns,
             onPositionChanged: (position) {
               _boardPosition = position;
             },
@@ -882,19 +827,22 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
             left: 0,
             right: 0,
             child: Center(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${_currentZoom.toStringAsFixed(1)}x',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+              child: RotatedBox(
+                quarterTurns: (_currentTurns * 4).round(),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_currentZoom.toStringAsFixed(1)}x',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -905,17 +853,20 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         if (_isProcessing)
           Container(
             color: Colors.black.withValues(alpha: 0.7),
-            child: const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(color: Colors.white),
-                  SizedBox(height: 16),
-                  Text(
-                    '処理中...',
-                    style: TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ],
+            child: Center(
+              child: RotatedBox(
+                quarterTurns: (_currentTurns * 4).round(),
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      '処理中...',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -940,13 +891,16 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Positioned(
           bottom: 16,
           left: 16,
-          child: ElevatedButton.icon(
-            onPressed: _retakeImage,
-            icon: const Icon(Icons.refresh),
-            label: const Text('Retake'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.black.withValues(alpha: 0.7),
-              foregroundColor: Colors.white,
+          child: RotatedBox(
+            quarterTurns: (_currentTurns * 4).round(),
+            child: ElevatedButton.icon(
+              onPressed: _retakeImage,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retake'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black.withValues(alpha: 0.7),
+                foregroundColor: Colors.white,
+              ),
             ),
           ),
         ),

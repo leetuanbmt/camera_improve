@@ -333,24 +333,17 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   }
 
   Future<void> _captureBoardScreenshot() async {
-    Logger.log(
-        '🎬 _captureBoardScreenshot called, _isBoardVisible: $_isBoardVisible');
-
     if (!_isBoardVisible) {
       Logger.log('⚠️ Board not visible, skipping capture');
       return;
     }
-
     try {
-      Logger.log('📸 Capturing board screenshot...');
-      final image = await _boardScreenshotController.capture();
-
-      if (image != null) {
-        _boardScreenshotBytes = image;
-        Logger.log('✅ Board captured successfully: ${image.length} bytes');
-      } else {
-        Logger.log('❌ Board capture returned null');
-      }
+      final stopwatch = Stopwatch()..start();
+      final image =
+          await _boardScreenshotController.capture(delay: Duration.zero);
+      _boardScreenshotBytes = image;
+      Logger.log(
+          '✅ Board captured successfully: ${stopwatch.elapsedMilliseconds}ms');
     } catch (e, stack) {
       Logger.log('❌ Error capturing board: $e');
       Logger.log('Stack trace: $stack');
@@ -396,7 +389,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       // Calculate final resize scale (applied AFTER merge)
       final scaleWidth = targetWidth / originalCameraWidth;
       final scaleHeight = targetHeight / originalCameraHeight;
-      final finalResizeScale = math.min(scaleWidth, scaleHeight);
+      final finalResizeScale = math.max(scaleWidth, scaleHeight);
 
       Logger.log(
           '📊 Final scale: ${finalResizeScale.toStringAsFixed(3)} (merge first, then resize)');

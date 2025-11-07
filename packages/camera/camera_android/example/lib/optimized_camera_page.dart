@@ -1,0 +1,964 @@
+// Copyright 2013 The Flutter Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:math' as math;
+import 'package:camera_example/camera_controller.dart';
+import 'package:camera_platform_interface/camera_platform_interface.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:opencv_core/opencv.dart' as cv;
+import 'package:path_provider/path_provider.dart';
+import 'package:screenshot/screenshot.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+
+import 'board_widget.dart';
+import 'camera_preview.dart';
+import 'logger.dart';
+
+/// Optimized Camera Page theo CAMERA_UI_ANALYSIS.md
+///
+/// Layout structure:
+/// - Header Bar (80px): Close button + Flash/Confirm
+/// - Main Content (Expanded): Camera Preview + Overlays
+/// - Bottom Controls (80px): Capture, Resolution, Settings
+class OptimizedCameraPage extends StatefulWidget {
+  const OptimizedCameraPage({
+    super.key,
+    required this.cameras,
+  });
+
+  final List<CameraDescription> cameras;
+
+  @override
+  State<OptimizedCameraPage> createState() => _OptimizedCameraPageState();
+}
+
+class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
+  CameraController? _controller;
+  bool _isInitialized = false;
+  bool _isProcessing = false;
+  XFile? _capturedImage;
+
+  // Camera settings
+  FlashMode _flashMode = FlashMode.auto;
+  double _currentZoom = 1.0;
+  double _minZoom = 1.0;
+  double _maxZoom = 5.0;
+  double _baseScale = 1.0;
+  int _pointers = 0;
+
+  // Resolution settings
+  ResolutionPreset _currentResolution =
+      ResolutionPreset.high; // 720p for better performance
+
+  // Rotation handling
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  DeviceOrientation _currentOrientation = DeviceOrientation.portraitUp;
+  double _currentTurns = 0.0;
+
+  // Board overlay
+  final _boardScreenshotController = ScreenshotController();
+  bool _isBoardVisible = true;
+  Offset? _boardPosition;
+  Size? _boardSize;
+  Uint8List? _boardScreenshotBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeCamera();
+    _startOrientationTracking();
+  }
+
+  @override
+  void dispose() {
+    _accelerometerSubscription?.cancel();
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initializeCamera() async {
+    if (widget.cameras.isEmpty) {
+      Logger.log('No cameras available');
+      return;
+    }
+
+    // Use back camera by default
+    final camera = widget.cameras.firstWhere(
+      (c) => c.lensDirection == CameraLensDirection.back,
+      orElse: () => widget.cameras.first,
+    );
+
+    _controller = CameraController(
+      camera,
+      mediaSettings: MediaSettings(
+        resolutionPreset: _currentResolution,
+        enableAudio: false,
+      ),
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+
+    try {
+      await _controller!.initialize();
+
+      // Get zoom capabilities
+      _minZoom =
+          await CameraPlatform.instance.getMinZoomLevel(_controller!.cameraId);
+      _maxZoom =
+          await CameraPlatform.instance.getMaxZoomLevel(_controller!.cameraId);
+
+      // Set initial settings
+      await CameraPlatform.instance
+          .setFlashMode(_controller!.cameraId, _flashMode);
+
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      Logger.log('Error initializing camera: $e');
+    }
+  }
+
+  // ============================================================================
+  // CAPTURE FUNCTIONS
+  // ============================================================================
+
+  Future<void> _takePicture() async {
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        _isProcessing) {
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      final stopwatch = Stopwatch()..start();
+
+      // Capture board screenshot if visible
+      if (_isBoardVisible) {
+        await _captureBoardScreenshot();
+        Logger.log('📊 Board capture time: ${stopwatch.elapsedMilliseconds}ms');
+      }
+
+      // Capture camera image
+      final image = await _controller!.takePicture();
+      Logger.log('✅ Camera capture time: ${stopwatch.elapsedMilliseconds}ms');
+
+      // Merge board with camera image
+      String? finalImagePath = image.path;
+      if (_isBoardVisible && _boardScreenshotBytes != null) {
+        Logger.log('🔄 Starting board merge...');
+        final mergeStart = stopwatch.elapsedMilliseconds;
+
+        finalImagePath = await _mergeBoardWithCameraImage(image.path);
+
+        final mergeTime = stopwatch.elapsedMilliseconds - mergeStart;
+        Logger.log('✅ Board merge time: ${mergeTime}ms');
+      }
+
+      setState(() {
+        _capturedImage = XFile(finalImagePath!);
+        _isProcessing = false;
+      });
+
+      Logger.log('📸 Final image: $finalImagePath');
+      Logger.log('⏱️ TOTAL TIME: ${stopwatch.elapsedMilliseconds}ms');
+      Logger.log('═══════════════════════════════════════');
+    } catch (e) {
+      Logger.log('Error capturing image: $e');
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
+  Future<void> _confirmImage() async {
+    if (_capturedImage == null) return;
+
+    // TODO: Navigate to next screen or process image
+    Logger.log('Image confirmed: ${_capturedImage!.path}');
+
+    // For now, just go back to camera
+    setState(() {
+      _capturedImage = null;
+    });
+  }
+
+  void _retakeImage() {
+    setState(() {
+      _capturedImage = null;
+    });
+  }
+
+  // ============================================================================
+  // FLASH CONTROL
+  // ============================================================================
+
+  Future<void> _toggleFlashMode() async {
+    if (_controller == null) return;
+
+    final modes = [
+      FlashMode.auto,
+      FlashMode.off,
+      FlashMode.always,
+      FlashMode.torch,
+    ];
+
+    final currentIndex = modes.indexOf(_flashMode);
+    final nextMode = modes[(currentIndex + 1) % modes.length];
+
+    await CameraPlatform.instance.setFlashMode(_controller!.cameraId, nextMode);
+    setState(() {
+      _flashMode = nextMode;
+    });
+  }
+
+  IconData _getFlashIcon() {
+    switch (_flashMode) {
+      case FlashMode.auto:
+        return Icons.flash_auto;
+      case FlashMode.always:
+        return Icons.flash_on;
+      case FlashMode.torch:
+        return Icons.flashlight_on;
+      case FlashMode.off:
+        return Icons.flash_off;
+    }
+  }
+
+  // ============================================================================
+  // ZOOM CONTROL
+  // ============================================================================
+
+  void _handleScaleStart(ScaleStartDetails details) {
+    _baseScale = _currentZoom;
+  }
+
+  Future<void> _handleScaleUpdate(ScaleUpdateDetails details) async {
+    if (_controller == null || _pointers != 2) return;
+
+    final scale = (_baseScale * details.scale).clamp(_minZoom, _maxZoom);
+
+    if (scale != _currentZoom) {
+      await CameraPlatform.instance.setZoomLevel(_controller!.cameraId, scale);
+      setState(() {
+        _currentZoom = scale;
+      });
+    }
+  }
+
+  // ============================================================================
+  // ROTATION TRACKING
+  // ============================================================================
+
+  void _startOrientationTracking() {
+    _accelerometerSubscription = accelerometerEventStream().listen((event) {
+      final newOrientation = _getOrientationFromAccelerometer(event);
+      if (newOrientation != _currentOrientation) {
+        setState(() {
+          _currentOrientation = newOrientation;
+          _currentTurns = _getRotationTurns(newOrientation);
+        });
+      }
+    });
+  }
+
+  DeviceOrientation _getOrientationFromAccelerometer(AccelerometerEvent event) {
+    const threshold = 5.0;
+
+    if (event.y > threshold) {
+      return DeviceOrientation.portraitUp;
+    } else if (event.y < -threshold) {
+      return DeviceOrientation.portraitDown;
+    } else if (event.x > threshold) {
+      return DeviceOrientation.landscapeLeft;
+    } else if (event.x < -threshold) {
+      return DeviceOrientation.landscapeRight;
+    }
+
+    return _currentOrientation;
+  }
+
+  double _getRotationTurns(DeviceOrientation orientation) {
+    switch (orientation) {
+      case DeviceOrientation.portraitUp:
+        return 0.0;
+      case DeviceOrientation.landscapeLeft:
+        return 0.25;
+      case DeviceOrientation.portraitDown:
+        return 0.5;
+      case DeviceOrientation.landscapeRight:
+        return -0.25;
+    }
+  }
+
+  // ============================================================================
+  // BOARD CONTROL
+  // ============================================================================
+
+  void _toggleBoardVisibility() {
+    setState(() {
+      _isBoardVisible = !_isBoardVisible;
+    });
+  }
+
+  Future<void> _captureBoardScreenshot() async {
+    Logger.log(
+        '🎬 _captureBoardScreenshot called, _isBoardVisible: $_isBoardVisible');
+
+    if (!_isBoardVisible) {
+      Logger.log('⚠️ Board not visible, skipping capture');
+      return;
+    }
+
+    try {
+      Logger.log('📸 Capturing board screenshot...');
+      final image = await _boardScreenshotController.capture();
+
+      if (image != null) {
+        _boardScreenshotBytes = image;
+        Logger.log('✅ Board captured successfully: ${image.length} bytes');
+      } else {
+        Logger.log('❌ Board capture returned null');
+      }
+    } catch (e, stack) {
+      Logger.log('❌ Error capturing board: $e');
+      Logger.log('Stack trace: $stack');
+    }
+  }
+
+// Thêm hàm utility này trong class
+  cv.Mat _resizeMat(cv.Mat input, int targetWidth, int targetHeight) {
+    Logger.log(
+        '🔧 Resizing: ${input.cols}x${input.rows} → ${targetWidth}x$targetHeight');
+    // OpenCV resize uses (width, height) - CORRECTED
+    return cv.resize(input, (targetWidth, targetHeight),
+        interpolation: cv.INTER_LINEAR);
+  }
+
+  Future<String?> _mergeBoardWithCameraImage(String cameraImagePath) async {
+    if (_boardScreenshotBytes == null) {
+      Logger.log('⚠️ No board screenshot captured');
+      return cameraImagePath;
+    }
+
+    // Use default position if not set (board hasn't been dragged yet)
+    final boardPos = _boardPosition ?? const Offset(20, 100);
+
+    try {
+      final mergeStopwatch = Stopwatch()..start();
+
+      // 1. Load camera image
+      Logger.log('📷 Loading camera image...');
+      final cameraBytes = await File(cameraImagePath).readAsBytes();
+      final cameraMat = cv.imdecode(cameraBytes, cv.IMREAD_COLOR);
+      Logger.log('✅ Camera loaded: ${mergeStopwatch.elapsedMilliseconds}ms');
+
+      // 2. Decode board image
+      Logger.log('🎨 Decoding board image...');
+      final boardMat = cv.imdecode(_boardScreenshotBytes!, cv.IMREAD_UNCHANGED);
+      Logger.log('✅ Board decoded: ${mergeStopwatch.elapsedMilliseconds}ms');
+
+      // 3. Get initial dimensions using .cols and .rows (reliable)
+      var cameraWidth = cameraMat.cols; // Width
+      var cameraHeight = cameraMat.rows; // Height
+      final boardWidth = boardMat.cols; // Width
+      final boardHeight = boardMat.rows; // Height
+
+      Logger.log('📐 Camera image size (raw): ${cameraWidth}x$cameraHeight');
+      Logger.log('📐 Board screenshot size: ${boardWidth}x$boardHeight');
+
+      // 4. CRITICAL: Handle orientation mismatch
+      // Camera sensor luôn capture ở native orientation (thường landscape)
+      // Preview và board có thể ở orientation khác (portrait)
+      final previewSize = _controller!.value.previewSize!;
+      final previewWidth = previewSize.height.toDouble();
+      final previewHeight = previewSize.width.toDouble();
+
+      Logger.log('📱 Preview size: ${previewWidth}x$previewHeight');
+
+      // Detect orientation
+      final isImageLandscape = cameraWidth > cameraHeight;
+      final isPreviewPortrait = previewHeight > previewWidth;
+      final isBoardPortrait = boardHeight > boardWidth;
+
+      Logger.log(
+          '🔍 Orientation check: Image=${isImageLandscape ? "Landscape" : "Portrait"}, Preview=${isPreviewPortrait ? "Portrait" : "Landscape"}, Board=${isBoardPortrait ? "Portrait" : "Landscape"}');
+
+      // Rotate camera image để match với preview và board orientation
+      cv.Mat orientedCameraMat = cameraMat;
+
+      if (isImageLandscape && isPreviewPortrait) {
+        // Image is landscape but preview/board are portrait → Rotate 90° CW
+        Logger.log(
+            '🔄 ROTATING camera image 90° clockwise (landscape → portrait)...');
+
+        orientedCameraMat = cv.rotate(cameraMat, cv.ROTATE_90_CLOCKWISE);
+
+        // Update dimensions after rotation
+        cameraWidth = orientedCameraMat.cols; // Width
+        cameraHeight = orientedCameraMat.rows; // Height
+
+        Logger.log(
+            '✅ Camera rotated: ${cameraWidth}x$cameraHeight (cols x rows)');
+      } else if (!isImageLandscape && !isPreviewPortrait) {
+        // Image is portrait but preview/board are landscape → Rotate 90° CCW
+        Logger.log(
+            '🔄 ROTATING camera image 90° counter-clockwise (portrait → landscape)...');
+
+        orientedCameraMat = cv.rotate(cameraMat, cv.ROTATE_90_COUNTERCLOCKWISE);
+
+        // Update dimensions using .cols and .rows
+        cameraWidth = orientedCameraMat.cols;
+        cameraHeight = orientedCameraMat.rows;
+
+        Logger.log(
+            '✅ Camera rotated: ${cameraWidth}x$cameraHeight (cols x rows)');
+      } else {
+        Logger.log('✅ Orientations match, no rotation needed');
+      }
+
+      Logger.log('📍 Board screen position: ${boardPos.dx}, ${boardPos.dy}');
+
+      // 5. Calculate scale factors với rotated image
+      final scaleX = cameraWidth / previewWidth;
+      final scaleY = cameraHeight / previewHeight;
+
+      Logger.log(
+          '📊 Scale factors (after orientation fix): X=$scaleX, Y=$scaleY');
+
+      // 6. Map board position từ preview coordinates → image coordinates
+      var imageBoardX = (boardPos.dx * scaleX).toInt();
+      var imageBoardY = (boardPos.dy * scaleY).toInt();
+
+      Logger.log('🎯 Board position on image: ($imageBoardX, $imageBoardY)');
+
+      // 7. Scale board size để match với image resolution
+      // Board được capture ở preview resolution, cần scale lên image resolution
+      var scaledBoardWidth = (boardWidth * scaleX).toInt();
+      var scaledBoardHeight = (boardHeight * scaleY).toInt();
+
+      Logger.log(
+          '📏 Board size on image: ${scaledBoardWidth}x$scaledBoardHeight');
+
+      // 8. VALIDATION: Ensure board fits within image after scaling
+      if (scaledBoardWidth > cameraWidth || scaledBoardHeight > cameraHeight) {
+        Logger.log(
+            '⚠️ Board too large after scaling, adjusting scale factors...');
+
+        // Calculate maximum allowed scale to fit within image
+        final maxScaleX = cameraWidth / boardWidth;
+        final maxScaleY = cameraHeight / boardHeight;
+        final maxScale = math.min(maxScaleX, maxScaleY) * 0.95; // 95% margin
+
+        // Recalculate with limited scale
+        final limitedScaleX = math.min(scaleX, maxScale);
+        final limitedScaleY = math.min(scaleY, maxScale);
+
+        // Recalculate position and size with limited scale
+        imageBoardX = (boardPos.dx * limitedScaleX).toInt();
+        imageBoardY = (boardPos.dy * limitedScaleY).toInt();
+        scaledBoardWidth = (boardWidth * limitedScaleX).toInt();
+        scaledBoardHeight = (boardHeight * limitedScaleY).toInt();
+
+        Logger.log(
+            '🔄 Adjusted board size: ${scaledBoardWidth}x$scaledBoardHeight');
+        Logger.log('🔄 Adjusted position: ($imageBoardX, $imageBoardY)');
+      }
+
+      // 9. Convert board to BGR if it has alpha channel
+      cv.Mat boardBGR = boardMat;
+      if (boardMat.channels == 4) {
+        Logger.log('🎨 Converting RGBA to BGR...');
+        boardBGR = cv.cvtColor(boardMat, cv.COLOR_RGBA2BGR);
+        Logger.log('✅ Converted: ${mergeStopwatch.elapsedMilliseconds}ms');
+      }
+
+      /// 10. Resize board to image resolution scale
+      Logger.log(
+          '🔧 Resizing board to ${scaledBoardWidth}x$scaledBoardHeight...');
+
+// FIX: Sử dụng utility function để tránh nhầm lẫn
+      cv.Mat scaledBoard =
+          _resizeMat(boardBGR, scaledBoardWidth, scaledBoardHeight);
+      Logger.log('✅ Board resized: ${mergeStopwatch.elapsedMilliseconds}ms');
+
+// 10.1. CRITICAL: Verify actual dimensions after resize
+      final actualWidth = scaledBoard.cols; // Width
+      final actualHeight = scaledBoard.rows; // Height
+
+      Logger.log(
+          '🔍 Dimension verification - Expected: ${scaledBoardWidth}x$scaledBoardHeight, Actual: ${actualWidth}x$actualHeight');
+
+// Nếu vẫn bị swap, tự động điều chỉnh
+      if (actualWidth != scaledBoardWidth ||
+          actualHeight != scaledBoardHeight) {
+        Logger.log('🔄 Auto-correcting dimension mismatch...');
+
+        if (actualWidth == scaledBoardHeight &&
+            actualHeight == scaledBoardWidth) {
+          Logger.log('✅ Dimensions were swapped, using as-is');
+          // Continue with swapped dimensions - they're actually correct
+        } else {
+          Logger.log('❌ Unfixable dimension mismatch');
+          return cameraImagePath;
+        }
+      }
+      Logger.log('✅ Dimension and channel verification passed');
+
+      // 11. Clamp position để board không vượt bounds (use actual dimensions)
+      final finalX = imageBoardX.clamp(0, cameraWidth - actualWidth);
+      final finalY = imageBoardY.clamp(0, cameraHeight - actualHeight);
+
+      Logger.log('✅ Final position (clamped): ($finalX, $finalY)');
+
+      // 12. Final bounds validation với actual dimensions
+      Logger.log('📋 Preparing to overlay board at ($finalX, $finalY)...');
+      Logger.log(
+          '🔍 Final bounds check: board(${actualWidth}x$actualHeight) at ($finalX, $finalY) on image(${cameraWidth}x$cameraHeight)');
+
+      // Triple check bounds với actual dimensions
+      if (finalX < 0 ||
+          finalY < 0 ||
+          finalX + actualWidth > cameraWidth ||
+          finalY + actualHeight > cameraHeight) {
+        Logger.log(
+            '❌ CRITICAL: Board out of bounds! x=$finalX, y=$finalY, w=$actualWidth, h=$actualHeight, imgW=$cameraWidth, imgH=$cameraHeight');
+        Logger.log('⚠️ Returning original image to prevent crash.');
+        return cameraImagePath;
+      }
+
+      // 13. Safe ROI extraction với validation
+      try {
+        // OpenCV uses row-first indexing: rows = Y axis, cols = X axis
+        final roiStartRow = finalY;
+        final roiEndRow = finalY + actualHeight;
+        final roiStartCol = finalX;
+        final roiEndCol = finalX + actualWidth;
+
+        Logger.log(
+            '🎯 Extracting ROI: rows[$roiStartRow:$roiEndRow], cols[$roiStartCol:$roiEndCol]');
+        Logger.log(
+            '🔍 Mat bounds: rows=${orientedCameraMat.rows}, cols=${orientedCameraMat.cols}');
+
+        // Final safety check before rowRange/colRange
+        if (roiEndRow > orientedCameraMat.rows ||
+            roiEndCol > orientedCameraMat.cols) {
+          Logger.log(
+              '❌ CRITICAL: ROI exceeds Mat bounds! rows: $roiEndRow > ${orientedCameraMat.rows}, cols: $roiEndCol > ${orientedCameraMat.cols}');
+          Logger.log('⚠️ Returning original image to prevent crash.');
+          return cameraImagePath;
+        }
+
+        final cameraROI = orientedCameraMat
+            .rowRange(roiStartRow, roiEndRow)
+            .colRange(roiStartCol, roiEndCol);
+
+        Logger.log('✅ ROI extracted successfully');
+
+        // Verify ROI dimensions match board
+        final roiWidth = cameraROI.cols; // Width
+        final roiHeight = cameraROI.rows; // Height
+
+        Logger.log(
+            '🔍 ROI verification - Expected: ${actualWidth}x$actualHeight, Actual: ${roiWidth}x$roiHeight');
+
+        if (roiWidth != actualWidth || roiHeight != actualHeight) {
+          Logger.log(
+              '❌ CRITICAL: ROI dimension mismatch! Cannot proceed with copyTo.');
+          Logger.log('⚠️ Returning original image to prevent crash.');
+          return cameraImagePath;
+        }
+
+        // Verify channels match
+        if (cameraROI.channels != scaledBoard.channels) {
+          Logger.log(
+              '❌ CRITICAL: Channel mismatch! ROI: ${cameraROI.channels}, Board: ${scaledBoard.channels}');
+          Logger.log('⚠️ Returning original image to prevent crash.');
+          return cameraImagePath;
+        }
+
+        Logger.log('✅ All validations passed, performing copyTo...');
+
+        // Finally, copy board to ROI
+        scaledBoard.copyTo(cameraROI);
+
+        Logger.log(
+            '✅ Board overlay complete: ${mergeStopwatch.elapsedMilliseconds}ms');
+      } catch (e, stack) {
+        Logger.log('❌ FATAL: OpenCV overlay crashed: $e');
+        Logger.log('Stack trace: $stack');
+        Logger.log('⚠️ Returning original image without board overlay');
+        return cameraImagePath;
+      }
+
+      // 14. Encode and save merged image (use oriented camera mat)
+      Logger.log('💾 Encoding merged image...');
+      final (success, encoded) = cv.imencode('.jpg', orientedCameraMat);
+
+      if (!success) {
+        Logger.log('❌ Failed to encode merged image');
+        return cameraImagePath;
+      }
+
+      // Save to temp file
+      final tempDir = await getTemporaryDirectory();
+      final mergedPath =
+          '${tempDir.path}/merged_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(mergedPath).writeAsBytes(encoded);
+
+      Logger.log('✅ Merged image saved: $mergedPath');
+      Logger.log(
+          '⏱️ Total merge time: ${mergeStopwatch.elapsedMilliseconds}ms');
+
+      return mergedPath;
+    } catch (e, stack) {
+      Logger.log('❌ Error merging board: $e');
+      Logger.log('Stack: $stack');
+      return cameraImagePath; // Return original on error
+    }
+  }
+  // ============================================================================
+  // UI BUILDERS
+  // ============================================================================
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: _capturedImage != null
+                  ? _buildImagePreview()
+                  : _buildCameraPreview(),
+            ),
+            _buildBottomControls(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------------------------
+  // HEADER BAR (80px)
+  // ----------------------------------------------------------------------------
+
+  Widget _buildHeader() {
+    return Container(
+      height: 80,
+      color: Colors.black.withValues(alpha: 0.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Close Button
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white, size: 32),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+
+          // Flash Control (Camera mode) or Confirm (Preview mode)
+          if (_capturedImage == null)
+            RotatedBox(
+              quarterTurns: (_currentTurns * 4).round(),
+              child: IconButton(
+                icon: Icon(_getFlashIcon(), color: Colors.white, size: 32),
+                onPressed: _toggleFlashMode,
+              ),
+            )
+          else
+            RotatedBox(
+              quarterTurns: (_currentTurns * 4).round(),
+              child: IconButton(
+                icon: const Icon(Icons.check, color: Colors.white, size: 32),
+                onPressed: _confirmImage,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------------------------
+  // MAIN CONTENT - CAMERA PREVIEW
+  // ----------------------------------------------------------------------------
+
+  Widget _buildCameraPreview() {
+    if (!_isInitialized || _controller == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Camera Preview with Pinch to Zoom
+        Listener(
+          onPointerDown: (_) => setState(() => _pointers++),
+          onPointerUp: (_) => setState(() => _pointers--),
+          child: GestureDetector(
+            onScaleStart: _handleScaleStart,
+            onScaleUpdate: _handleScaleUpdate,
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _controller!.value.previewSize!.height,
+                height: _controller!.value.previewSize!.width,
+                child: CameraPreview(_controller!),
+              ),
+            ),
+          ),
+        ),
+
+        // Board overlay
+        if (_isBoardVisible)
+          BoardWidget(
+            screenshotController: _boardScreenshotController,
+            initialPosition: _boardPosition,
+            initialSize: _boardSize,
+            onPositionChanged: (position) {
+              _boardPosition = position;
+            },
+            onSizeChanged: (size) {
+              _boardSize = size;
+            },
+          ),
+
+        // Zoom indicator
+        if (_currentZoom > 1.0)
+          Positioned(
+            top: 16,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${_currentZoom.toStringAsFixed(1)}x',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // Processing indicator
+        if (_isProcessing)
+          Container(
+            color: Colors.black.withValues(alpha: 0.7),
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 16),
+                  Text(
+                    '処理中...',
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ----------------------------------------------------------------------------
+  // MAIN CONTENT - IMAGE PREVIEW
+  // ----------------------------------------------------------------------------
+
+  Widget _buildImagePreview() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.file(
+          File(_capturedImage!.path),
+          fit: BoxFit.contain,
+        ),
+
+        // Retake button
+        Positioned(
+          bottom: 16,
+          left: 16,
+          child: ElevatedButton.icon(
+            onPressed: _retakeImage,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retake'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black.withValues(alpha: 0.7),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ----------------------------------------------------------------------------
+  // BOTTOM CONTROLS (80px)
+  // ----------------------------------------------------------------------------
+
+  Widget _buildBottomControls() {
+    if (_capturedImage != null) {
+      return const SizedBox(height: 80); // Hide controls in preview mode
+    }
+
+    return Container(
+      height: 80,
+      color: Colors.black.withValues(alpha: 0.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Resolution button
+          RotatedBox(
+            quarterTurns: (_currentTurns * 4).round(),
+            child: _buildControlButton(
+              icon: Icons.photo_size_select_actual,
+              label: _getResolutionLabel(),
+              onPressed: _showResolutionDialog,
+            ),
+          ),
+
+          // Capture button (larger, centered)
+          RotatedBox(
+            quarterTurns: (_currentTurns * 4).round(),
+            child: GestureDetector(
+              onTap: _takePicture,
+              child: Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white,
+                  border: Border.all(color: Colors.white, width: 4),
+                ),
+                child: _isProcessing
+                    ? const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: Colors.black,
+                        ),
+                      )
+                    : const Icon(Icons.camera, size: 32, color: Colors.black),
+              ),
+            ),
+          ),
+
+          // Board visibility toggle
+          RotatedBox(
+            quarterTurns: (_currentTurns * 4).round(),
+            child: _buildControlButton(
+              icon: _isBoardVisible ? Icons.layers : Icons.layers_clear,
+              label: 'Board',
+              onPressed: _toggleBoardVisibility,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          icon: Icon(icon, color: Colors.white, size: 28),
+          onPressed: onPressed,
+        ),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 10),
+        ),
+      ],
+    );
+  }
+
+  // ----------------------------------------------------------------------------
+  // RESOLUTION DIALOG
+  // ----------------------------------------------------------------------------
+
+  String _getResolutionLabel() {
+    switch (_currentResolution) {
+      case ResolutionPreset.low:
+        return '320p';
+      case ResolutionPreset.medium:
+        return '480p';
+      case ResolutionPreset.high:
+        return '720p';
+      case ResolutionPreset.veryHigh:
+        return '1080p';
+      case ResolutionPreset.ultraHigh:
+        return '2K';
+      case ResolutionPreset.max:
+        return '4K';
+    }
+  }
+
+  Future<void> _showResolutionDialog() async {
+    final resolutions = [
+      (ResolutionPreset.low, '320p (Fast)'),
+      (ResolutionPreset.medium, '480p'),
+      (ResolutionPreset.high, '720p'),
+      (ResolutionPreset.veryHigh, '1080p (Default)'),
+      (ResolutionPreset.ultraHigh, '2K'),
+      (ResolutionPreset.max, '4K (Max Quality)'),
+    ];
+
+    final selected = await showDialog<ResolutionPreset>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Resolution'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: resolutions.map((res) {
+            return RadioListTile<ResolutionPreset>(
+              title: Text(res.$2),
+              value: res.$1,
+              groupValue: _currentResolution,
+              onChanged: (value) {
+                Navigator.pop(context, value);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+
+    if (selected != null && selected != _currentResolution) {
+      setState(() {
+        _currentResolution = selected;
+        _isInitialized = false;
+      });
+
+      await _controller?.dispose();
+      await _initializeCamera();
+    }
+  }
+}

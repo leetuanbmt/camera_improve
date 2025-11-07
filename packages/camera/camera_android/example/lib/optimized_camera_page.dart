@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:camera_example/camera_controller.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
@@ -51,8 +52,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   int _pointers = 0;
 
   // Resolution settings
-  ResolutionPreset _currentResolution =
-      ResolutionPreset.high; // 720p for better performance
+  ResolutionPreset _currentResolution = ResolutionPreset.max;
 
   // Rotation handling
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
@@ -65,6 +65,14 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   late Offset _boardPosition;
   late Size _boardSize;
   Uint8List? _boardScreenshotBytes;
+
+  // Output resolution settings (for optimization)
+  final resolutions = <Size>[
+    Size(640, 480), // Low - fast processing
+    Size(1200, 900), // Medium - balanced
+    Size(2000, 1500), // High - best quality
+  ];
+  int _selectedResolutionIndex = 1; // Default to medium
 
   // Preview rendering key để lấy actual screen size
   final GlobalKey _previewKey = GlobalKey();
@@ -154,20 +162,22 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       }
 
       // Capture camera image
-      final image = await _controller!.takePicture();
+      final image = await _controller!.captureToMemory();
       Logger.log('✅ Camera capture time: ${stopwatch.elapsedMilliseconds}ms');
 
       // Merge board with camera image
-      String? finalImagePath = image.path;
+      String? finalImagePath;
       if (_isBoardVisible && _boardScreenshotBytes != null) {
         Logger.log('🔄 Starting board merge...');
         final mergeStart = stopwatch.elapsedMilliseconds;
 
-        finalImagePath = await _mergeBoardWithCameraImage(image.path);
+        finalImagePath = await _mergeBoardWithCameraImage(image.bytes);
 
         final mergeTime = stopwatch.elapsedMilliseconds - mergeStart;
         Logger.log('✅ Board merge time: ${mergeTime}ms');
       }
+
+      if (finalImagePath == null) return;
 
       setState(() {
         _capturedImage = XFile(finalImagePath!);
@@ -179,9 +189,16 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       final fileSizeBytes = await imageFile.length();
       final fileSizeMB = fileSizeBytes / (1024 * 1024);
 
+      // Check actual final image dimensions
+      final finalImageBytes = await imageFile.readAsBytes();
+      final finalImageMat = cv.imdecode(finalImageBytes, cv.IMREAD_COLOR);
+      final finalWidth = finalImageMat.cols;
+      final finalHeight = finalImageMat.rows;
+
       Logger.log('📸 Final image: $finalImagePath');
       Logger.log(
           '💾 Image size: ${fileSizeMB.toStringAsFixed(2)} MB (${fileSizeBytes} bytes)');
+      Logger.log('📐 Final image dimensions: ${finalWidth}x$finalHeight');
       Logger.log('⏱️ TOTAL TIME: ${stopwatch.elapsedMilliseconds}ms');
       Logger.log('═══════════════════════════════════════');
     } catch (e) {
@@ -356,10 +373,10 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         interpolation: cv.INTER_LINEAR);
   }
 
-  Future<String?> _mergeBoardWithCameraImage(String cameraImagePath) async {
+  Future<String?> _mergeBoardWithCameraImage(Uint8List cameraBytes) async {
     if (_boardScreenshotBytes == null) {
       Logger.log('⚠️ No board screenshot captured');
-      return cameraImagePath;
+      return null;
     }
 
     try {
@@ -367,25 +384,54 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
       // 1. Load camera image
       Logger.log('📷 Loading camera image...');
-      final cameraBytes = await File(cameraImagePath).readAsBytes();
       final cameraMat = cv.imdecode(cameraBytes, cv.IMREAD_COLOR);
       Logger.log('✅ Camera loaded: ${mergeStopwatch.elapsedMilliseconds}ms');
 
-      // 2. Decode board image
+      Logger.log(
+          '📐 Original camera size: ${cameraMat.cols}x${cameraMat.rows}');
+
+      // 2. Store original camera dimensions for merge
+      // We'll merge at ORIGINAL size, then resize at the end (better quality)
+      final originalCameraWidth = cameraMat.cols;
+      final originalCameraHeight = cameraMat.rows;
+
+      Logger.log(
+          '📐 Original camera: ${originalCameraWidth}x$originalCameraHeight');
+
+      // Calculate target resize scale (will apply AFTER merge)
+      final targetResolution = resolutions[_selectedResolutionIndex];
+      Logger.log(
+          '🎯 Target resolution: ${targetResolution.width.toInt()}x${targetResolution.height.toInt()}');
+
+      final targetWidth = targetResolution.width.toInt();
+      final targetHeight = targetResolution.height.toInt();
+
+      final scaleWidth = targetWidth / originalCameraWidth;
+      final scaleHeight = targetHeight / originalCameraHeight;
+      final finalResizeScale = math.min(scaleWidth, scaleHeight);
+
+      Logger.log(
+          '📊 Final resize scale (applied after merge): ${finalResizeScale.toStringAsFixed(3)}');
+
+      // Use original camera mat for merge (better board quality)
+      final resizedCameraMat = cameraMat;
+
+      // 3. Decode board image
       Logger.log('🎨 Decoding board image...');
       final boardMat = cv.imdecode(_boardScreenshotBytes!, cv.IMREAD_UNCHANGED);
       Logger.log('✅ Board decoded: ${mergeStopwatch.elapsedMilliseconds}ms');
 
-      // 3. Get initial dimensions using .cols and .rows (reliable)
-      var cameraWidth = cameraMat.cols; // Width
-      var cameraHeight = cameraMat.rows; // Height
+      // 4. Get dimensions of resized camera (now working with optimized size)
+      var cameraWidth = resizedCameraMat.cols; // Width
+      var cameraHeight = resizedCameraMat.rows; // Height
       final boardWidth = boardMat.cols; // Width
       final boardHeight = boardMat.rows; // Height
 
-      Logger.log('📐 Camera image size (raw): ${cameraWidth}x$cameraHeight');
+      Logger.log(
+          '📐 Camera image size (after resize): ${cameraWidth}x$cameraHeight');
       Logger.log('📐 Board screenshot size: ${boardWidth}x$boardHeight');
 
-      // 4. CRITICAL: Handle orientation mismatch
+      // 5. CRITICAL: Handle orientation mismatch
       // Camera sensor luôn capture ở native orientation (thường landscape)
       // Preview và board có thể ở orientation khác (portrait)
       final previewSize = _controller!.value.previewSize!;
@@ -402,15 +448,15 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       Logger.log(
           '🔍 Orientation check: Image=${isImageLandscape ? "Landscape" : "Portrait"}, Preview=${isPreviewPortrait ? "Portrait" : "Landscape"}, Board=${isBoardPortrait ? "Portrait" : "Landscape"}');
 
-      // Rotate camera image để match với preview và board orientation
-      cv.Mat orientedCameraMat = cameraMat;
+      // Rotate resized camera image để match với preview và board orientation
+      cv.Mat orientedCameraMat = resizedCameraMat;
 
       if (isImageLandscape && isPreviewPortrait) {
         // Image is landscape but preview/board are portrait → Rotate 90° CW
         Logger.log(
             '🔄 ROTATING camera image 90° clockwise (landscape → portrait)...');
 
-        orientedCameraMat = cv.rotate(cameraMat, cv.ROTATE_90_CLOCKWISE);
+        orientedCameraMat = cv.rotate(resizedCameraMat, cv.ROTATE_90_CLOCKWISE);
 
         // Update dimensions after rotation
         cameraWidth = orientedCameraMat.cols; // Width
@@ -423,7 +469,8 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log(
             '🔄 ROTATING camera image 90° counter-clockwise (portrait → landscape)...');
 
-        orientedCameraMat = cv.rotate(cameraMat, cv.ROTATE_90_COUNTERCLOCKWISE);
+        orientedCameraMat =
+            cv.rotate(resizedCameraMat, cv.ROTATE_90_COUNTERCLOCKWISE);
 
         // Update dimensions using .cols and .rows
         cameraWidth = orientedCameraMat.cols;
@@ -438,30 +485,30 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       Logger.log(
           '📍 Board screen position: ${_boardPosition.dx}, ${_boardPosition.dy}');
 
-      // 5. Get device pixel ratio - board screenshot bị scale bởi pixel ratio
+      // 6. Get device pixel ratio - board screenshot bị scale bởi pixel ratio
       final pixelRatio = MediaQuery.of(context).devicePixelRatio;
       Logger.log('📱 Device pixel ratio: $pixelRatio');
 
-      // 6. Calculate board widget's actual size (before pixel ratio scaling)
+      // 7. Calculate board widget's actual size (before pixel ratio scaling)
       final boardWidgetWidth = boardWidth / pixelRatio;
       final boardWidgetHeight = boardHeight / pixelRatio;
 
       Logger.log(
           '📐 Board widget size (logical pixels): ${boardWidgetWidth.toStringAsFixed(1)}x${boardWidgetHeight.toStringAsFixed(1)}');
 
-      // 7. Get actual preview screen size (rendered on screen)
+      // 8. Get actual preview screen size (rendered on screen)
       final renderBox =
           _previewKey.currentContext?.findRenderObject() as RenderBox?;
       if (renderBox == null) {
         Logger.log('❌ Cannot get preview render box');
-        return cameraImagePath;
+        return null;
       }
 
       final previewScreenSize = renderBox.size;
       Logger.log(
           '📺 Preview screen size (container): ${previewScreenSize.width.toStringAsFixed(1)}x${previewScreenSize.height.toStringAsFixed(1)}');
 
-      // 8. Calculate BoxFit.cover scaling and offset
+      // 9. Calculate BoxFit.cover scaling and offset
       // Preview native size (what FittedBox is trying to fit)
       final nativeWidth = previewWidth;
       final nativeHeight = previewHeight;
@@ -492,7 +539,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       Logger.log(
           '✂️ Crop offset: X=${offsetX.toStringAsFixed(1)}, Y=${offsetY.toStringAsFixed(1)}');
 
-      // 9. Calculate scale factors từ preview screen → camera image
+      // 10. Calculate scale factors từ preview screen → camera image
       // Cần map từ: board screen position → preview native position → camera image
       final scaleX = cameraWidth / nativeWidth;
       final scaleY = cameraHeight / nativeHeight;
@@ -500,7 +547,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       Logger.log(
           '📊 Scale factors (native→image): X=${scaleX.toStringAsFixed(2)}, Y=${scaleY.toStringAsFixed(2)}');
 
-      // 10. Map board position từ screen coordinates → image coordinates
+      // 11. Map board position từ screen coordinates → image coordinates
       // Step 1: Add crop offset to get position on rendered preview (before crop)
       final posOnRenderedX = _boardPosition.dx + offsetX;
       final posOnRenderedY = _boardPosition.dy + offsetY;
@@ -521,7 +568,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
       Logger.log('🎯 Board position on image: ($imageBoardX, $imageBoardY)');
 
-      // 11. Scale board size để match với image resolution
+      // 12. Scale board size để match với image resolution
       // Board widget on screen → native preview size → image size
       // Step 1: Convert board widget size to native preview size
       final boardOnNativeWidth = boardWidgetWidth / fitScale;
@@ -537,7 +584,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       Logger.log(
           '📏 Board size on image: ${scaledBoardWidth}x$scaledBoardHeight');
 
-      // 12. VALIDATION: Ensure board fits within image after scaling
+      // 13. VALIDATION: Ensure board fits within image after scaling
       if (scaledBoardWidth > cameraWidth || scaledBoardHeight > cameraHeight) {
         Logger.log('⚠️ Board too large after scaling, adjusting...');
 
@@ -559,7 +606,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
             '🔄 Adjusted board size: ${scaledBoardWidth}x$scaledBoardHeight');
       }
 
-      // 13. Convert board to BGR if it has alpha channel
+      // 14. Convert board to BGR if it has alpha channel
       cv.Mat boardBGR = boardMat;
       if (boardMat.channels == 4) {
         Logger.log('🎨 Converting RGBA to BGR...');
@@ -567,7 +614,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('✅ Converted: ${mergeStopwatch.elapsedMilliseconds}ms');
       }
 
-      // 14. Resize board to image resolution scale
+      // 15. Resize board to image resolution scale
       Logger.log(
           '🔧 Resizing board to ${scaledBoardWidth}x$scaledBoardHeight...');
 
@@ -576,7 +623,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           _resizeMat(boardBGR, scaledBoardWidth, scaledBoardHeight);
       Logger.log('✅ Board resized: ${mergeStopwatch.elapsedMilliseconds}ms');
 
-      // 15. CRITICAL: Verify actual dimensions after resize
+      // 16. CRITICAL: Verify actual dimensions after resize
       final actualWidth = scaledBoard.cols; // Width
       final actualHeight = scaledBoard.rows; // Height
 
@@ -594,18 +641,18 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           // Continue with swapped dimensions - they're actually correct
         } else {
           Logger.log('❌ Unfixable dimension mismatch');
-          return cameraImagePath;
+          return null;
         }
       }
       Logger.log('✅ Dimension and channel verification passed');
 
-      // 16. Clamp position để board không vượt bounds (use actual dimensions)
+      // 17. Clamp position để board không vượt bounds (use actual dimensions)
       final finalX = imageBoardX.clamp(0, cameraWidth - actualWidth);
       final finalY = imageBoardY.clamp(0, cameraHeight - actualHeight);
 
       Logger.log('✅ Final position (clamped): ($finalX, $finalY)');
 
-      // 17. Final bounds validation với actual dimensions
+      // 18. Final bounds validation với actual dimensions
       Logger.log('📋 Preparing to overlay board at ($finalX, $finalY)...');
       Logger.log(
           '🔍 Final bounds check: board(${actualWidth}x$actualHeight) at ($finalX, $finalY) on image(${cameraWidth}x$cameraHeight)');
@@ -618,10 +665,10 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log(
             '❌ CRITICAL: Board out of bounds! x=$finalX, y=$finalY, w=$actualWidth, h=$actualHeight, imgW=$cameraWidth, imgH=$cameraHeight');
         Logger.log('⚠️ Returning original image to prevent crash.');
-        return cameraImagePath;
+        return null;
       }
 
-      // 18. Safe ROI extraction với validation
+      // 19. Safe ROI extraction với validation
       try {
         // OpenCV uses row-first indexing: rows = Y axis, cols = X axis
         final roiStartRow = finalY;
@@ -640,7 +687,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           Logger.log(
               '❌ CRITICAL: ROI exceeds Mat bounds! rows: $roiEndRow > ${orientedCameraMat.rows}, cols: $roiEndCol > ${orientedCameraMat.cols}');
           Logger.log('⚠️ Returning original image to prevent crash.');
-          return cameraImagePath;
+          return null;
         }
 
         final cameraROI = orientedCameraMat
@@ -660,7 +707,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           Logger.log(
               '❌ CRITICAL: ROI dimension mismatch! Cannot proceed with copyTo.');
           Logger.log('⚠️ Returning original image to prevent crash.');
-          return cameraImagePath;
+          return null;
         }
 
         // Verify channels match
@@ -668,7 +715,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           Logger.log(
               '❌ CRITICAL: Channel mismatch! ROI: ${cameraROI.channels}, Board: ${scaledBoard.channels}');
           Logger.log('⚠️ Returning original image to prevent crash.');
-          return cameraImagePath;
+          return null;
         }
 
         Logger.log('✅ All validations passed, performing copyTo...');
@@ -682,16 +729,37 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('❌ FATAL: OpenCV overlay crashed: $e');
         Logger.log('Stack trace: $stack');
         Logger.log('⚠️ Returning original image without board overlay');
-        return cameraImagePath;
+        return null;
       }
 
-      // 19. Encode and save merged image (use oriented camera mat)
-      Logger.log('💾 Encoding merged image...');
-      final (success, encoded) = cv.imencode('.jpg', orientedCameraMat);
+      // 20. Resize final merged image to target resolution
+      cv.Mat finalMat = orientedCameraMat;
+
+      if (finalResizeScale < 1.0) {
+        // Only resize if target is smaller than original
+        final finalWidth = (orientedCameraMat.cols * finalResizeScale).toInt();
+        final finalHeight = (orientedCameraMat.rows * finalResizeScale).toInt();
+
+        Logger.log(
+            '🔧 Final resize: ${orientedCameraMat.cols}x${orientedCameraMat.rows} → ${finalWidth}x$finalHeight');
+
+        finalMat = _resizeMat(orientedCameraMat, finalWidth, finalHeight);
+        Logger.log(
+            '✅ Final resize complete: ${mergeStopwatch.elapsedMilliseconds}ms');
+        Logger.log(
+            '🔍 Actual final mat size: ${finalMat.cols}x${finalMat.rows}');
+      } else {
+        Logger.log('✅ No final resize needed (target >= original)');
+      }
+
+      // 21. Encode and save final image
+      Logger.log(
+          '💾 Encoding final image (${finalMat.cols}x${finalMat.rows})...');
+      final (success, encoded) = cv.imencode('.jpg', finalMat);
 
       if (!success) {
-        Logger.log('❌ Failed to encode merged image');
-        return cameraImagePath;
+        Logger.log('❌ Failed to encode final image');
+        return null;
       }
 
       // Save to temp file
@@ -701,6 +769,9 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       await File(mergedPath).writeAsBytes(encoded);
 
       Logger.log('✅ Merged image saved: $mergedPath');
+      Logger.log('📏 Encoded image size: ${encoded.length} bytes');
+      Logger.log(
+          '📐 Final image dimensions: ${finalMat.cols}x${finalMat.rows}');
       Logger.log(
           '⏱️ Total merge time: ${mergeStopwatch.elapsedMilliseconds}ms');
 
@@ -708,7 +779,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     } catch (e, stack) {
       Logger.log('❌ Error merging board: $e');
       Logger.log('Stack: $stack');
-      return cameraImagePath; // Return original on error
+      return null; // Return original on error
     }
   }
   // ============================================================================
@@ -917,13 +988,23 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Resolution button
+          // Camera Resolution button
           RotatedBox(
             quarterTurns: (_currentTurns * 4).round(),
             child: _buildControlButton(
               icon: Icons.photo_size_select_actual,
               label: _getResolutionLabel(),
               onPressed: _showResolutionDialog,
+            ),
+          ),
+
+          // Output Quality button
+          RotatedBox(
+            quarterTurns: (_currentTurns * 4).round(),
+            child: _buildControlButton(
+              icon: Icons.photo,
+              label: _getOutputQualityLabel(),
+              onPressed: _showOutputQualityDialog,
             ),
           ),
 
@@ -1008,6 +1089,23 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     }
   }
 
+  String _getOutputQualityLabel() {
+    final resolution = resolutions[_selectedResolutionIndex];
+    final width = resolution.width.toInt();
+    final height = resolution.height.toInt();
+
+    switch (_selectedResolutionIndex) {
+      case 0:
+        return 'Low';
+      case 1:
+        return 'Med';
+      case 2:
+        return 'High';
+      default:
+        return '$width×$height';
+    }
+  }
+
   Future<void> _showResolutionDialog() async {
     final resolutions = [
       (ResolutionPreset.low, '320p (Fast)'),
@@ -1046,6 +1144,50 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
       await _controller?.dispose();
       await _initializeCamera();
+    }
+  }
+
+  Future<void> _showOutputQualityDialog() async {
+    final outputResolutions = [
+      (0, '640×480 (Low - Fast)', '~200KB'),
+      (1, '1200×900 (Medium)', '~500KB'),
+      (2, '2000×1500 (High)', '~1MB'),
+    ];
+
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Output Quality'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Choose final image quality (affects performance)',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            ...outputResolutions.map((res) {
+              return RadioListTile<int>(
+                title: Text(res.$2),
+                subtitle: Text('Est. size: ${res.$3}'),
+                value: res.$1,
+                groupValue: _selectedResolutionIndex,
+                onChanged: (value) {
+                  Navigator.pop(context, value);
+                },
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+    );
+
+    if (selected != null && selected != _selectedResolutionIndex) {
+      setState(() {
+        _selectedResolutionIndex = selected;
+      });
+      Logger.log('📐 Output quality changed to: ${resolutions[selected]}');
     }
   }
 }

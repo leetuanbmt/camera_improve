@@ -189,16 +189,9 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       final fileSizeBytes = await imageFile.length();
       final fileSizeMB = fileSizeBytes / (1024 * 1024);
 
-      // Check actual final image dimensions
-      final finalImageBytes = await imageFile.readAsBytes();
-      final finalImageMat = cv.imdecode(finalImageBytes, cv.IMREAD_COLOR);
-      final finalWidth = finalImageMat.cols;
-      final finalHeight = finalImageMat.rows;
-
       Logger.log('📸 Final image: $finalImagePath');
       Logger.log(
           '💾 Image size: ${fileSizeMB.toStringAsFixed(2)} MB (${fileSizeBytes} bytes)');
-      Logger.log('📐 Final image dimensions: ${finalWidth}x$finalHeight');
       Logger.log('⏱️ TOTAL TIME: ${stopwatch.elapsedMilliseconds}ms');
       Logger.log('═══════════════════════════════════════');
     } catch (e) {
@@ -387,33 +380,28 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       final cameraMat = cv.imdecode(cameraBytes, cv.IMREAD_COLOR);
       Logger.log('✅ Camera loaded: ${mergeStopwatch.elapsedMilliseconds}ms');
 
-      Logger.log(
-          '📐 Original camera size: ${cameraMat.cols}x${cameraMat.rows}');
-
-      // 2. Store original camera dimensions for merge
-      // We'll merge at ORIGINAL size, then resize at the end (better quality)
+      // 2. Store camera dimensions (merge at original for best quality)
       final originalCameraWidth = cameraMat.cols;
       final originalCameraHeight = cameraMat.rows;
 
       Logger.log(
-          '📐 Original camera: ${originalCameraWidth}x$originalCameraHeight');
+          '📐 Camera size: ${originalCameraWidth}x$originalCameraHeight');
 
-      // Calculate target resize scale (will apply AFTER merge)
       final targetResolution = resolutions[_selectedResolutionIndex];
-      Logger.log(
-          '🎯 Target resolution: ${targetResolution.width.toInt()}x${targetResolution.height.toInt()}');
-
       final targetWidth = targetResolution.width.toInt();
       final targetHeight = targetResolution.height.toInt();
 
+      Logger.log('🎯 Target output: ${targetWidth}x$targetHeight');
+
+      // Calculate final resize scale (applied AFTER merge)
       final scaleWidth = targetWidth / originalCameraWidth;
       final scaleHeight = targetHeight / originalCameraHeight;
       final finalResizeScale = math.min(scaleWidth, scaleHeight);
 
       Logger.log(
-          '📊 Final resize scale (applied after merge): ${finalResizeScale.toStringAsFixed(3)}');
+          '📊 Final scale: ${finalResizeScale.toStringAsFixed(3)} (merge first, then resize)');
 
-      // Use original camera mat for merge (better board quality)
+      // Use original camera mat for merge
       final resizedCameraMat = cameraMat;
 
       // 3. Decode board image

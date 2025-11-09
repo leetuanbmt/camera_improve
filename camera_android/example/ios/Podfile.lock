@@ -1,0 +1,84 @@
+PODS:
+  - DartCvIOS (4.12.0.0):
+    - DartCvIOS/calib3d (= 4.12.0.0)
+    - DartCvIOS/contrib (= 4.12.0.0)
+    - DartCvIOS/core (= 4.12.0.0)
+    - DartCvIOS/features2d (= 4.12.0.0)
+    - DartCvIOS/imgproc (= 4.12.0.0)
+    - DartCvIOS/objdetect (= 4.12.0.0)
+    - DartCvIOS/photo (= 4.12.0.0)
+    - DartCvIOS/stitching (= 4.12.0.0)
+    - DartCvIOS/video (= 4.12.0.0)
+  - DartCvIOS/calib3d (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/contrib (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/core (4.12.0.0)
+  - DartCvIOS/dnn (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/features2d (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/imgproc (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/objdetect (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/photo (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/stitching (4.12.0.0):
+    - DartCvIOS/core
+  - DartCvIOS/video (4.12.0.0):
+    - DartCvIOS/core
+  - Flutter (1.0.0)
+  - integration_test (0.0.1):
+    - Flutter
+  - opencv_core (0.0.1):
+    - DartCvIOS (= 4.12.0.0)
+    - DartCvIOS/dnn (= 4.12.0.0)
+    - Flutter
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - sensors_plus (0.0.1):
+    - Flutter
+  - video_player_avfoundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
+  - opencv_core (from `.symlinks/plugins/opencv_core/ios`)
+  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
+  - sensors_plus (from `.symlinks/plugins/sensors_plus/ios`)
+  - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
+
+SPEC REPOS:
+  trunk:
+    - DartCvIOS
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
+  opencv_core:
+    :path: ".symlinks/plugins/opencv_core/ios"
+  path_provider_foundation:
+    :path: ".symlinks/plugins/path_provider_foundation/darwin"
+  sensors_plus:
+    :path: ".symlinks/plugins/sensors_plus/ios"
+  video_player_avfoundation:
+    :path: ".symlinks/plugins/video_player_avfoundation/darwin"
+
+SPEC CHECKSUMS:
+  DartCvIOS: 3b4638e0f24b5f48a25378815618b9f8c1e87ad4
+  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
+  opencv_core: 1ab23ed0da6311d7f1ed818ea89568443dde1129
+  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
+  sensors_plus: 3c3bac724a2128c895623e03efd82cf0e94fd8e8
+  video_player_avfoundation: 2cef49524dd1f16c5300b9cd6efd9611ce03639b
+
+PODFILE CHECKSUM: 819463e6a0290f5a72f145ba7cde16e8b6ef0796
+
+COCOAPODS: 1.16.2

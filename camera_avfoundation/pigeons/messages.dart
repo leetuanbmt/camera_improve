@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 import 'package:pigeon/pigeon.dart';
-import 'dart:typed_data';
 
 @ConfigurePigeon(PigeonOptions(
   dartOut: 'lib/src/messages.g.dart',
@@ -166,6 +165,26 @@ class PlatformCapturedImageData {
   final int height;
 }
 
+class PlatformTargetResolution {
+  PlatformTargetResolution({
+    required this.width,
+    required this.height,
+  });
+
+  final int width;
+  final int height;
+}
+
+class PlatformCaptureOptions {
+  PlatformCaptureOptions({
+    required this.targetResolution,
+    this.boardData,
+  });
+
+  final PlatformTargetResolution targetResolution;
+  final PlatformBoardOverlayData? boardData;
+}
+
 class PlatformBoardOverlayData {
   PlatformBoardOverlayData({
     required this.boardImageBytes,
@@ -178,7 +197,6 @@ class PlatformBoardOverlayData {
     required this.devicePixelRatio,
     required this.targetWidth,
     required this.targetHeight,
-    this.usePreviewFrame = false,
   });
 
   final Uint8List boardImageBytes;
@@ -191,7 +209,6 @@ class PlatformBoardOverlayData {
   final double devicePixelRatio;
   final int targetWidth;
   final int targetHeight;
-  final bool usePreviewFrame;
 }
 
 @HostApi()
@@ -257,14 +274,8 @@ abstract class CameraApi {
   /// as JPEG. Orientation is automatically handled based on the device's
   /// current orientation.
   @async
-  @ObjCSelector('captureToMemory')
-  PlatformCapturedImageData captureToMemory();
-
-  /// Captures to memory while applying board overlay data natively.
-  /// If board data requests preview frame usage, the capture uses the latest preview buffer.
-  @async
-  @ObjCSelector('captureToMemoryWithBoard:')
-  PlatformCapturedImageData captureToMemoryWithBoard(PlatformBoardOverlayData boardData);
+  @ObjCSelector('captureToMemory:')
+  PlatformCapturedImageData captureToMemory(PlatformCaptureOptions options);
 
   /// Does any preprocessing necessary before beginning to record video.
   @async

@@ -452,89 +452,117 @@ final class DefaultCamera: FLTCam, Camera {
   }
 
   func captureToMemory(
+    _ options: FCPPlatformCaptureOptions,
     completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
   ) {
-    // Call the Objective-C method from FLTCam
-    (self as FLTCam).captureToMemory(completion: { data, width, height, error in
-      completion(data, Int(width), Int(height), error)
-    })
-  }
-
-  func captureToMemoryWithBoard(
-    _ boardData: FCPPlatformBoardOverlayData,
-    completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
-  ) {
-    captureToMemory { data, width, height, error in
+    (self as FLTCam).captureToMemory { data, width, height, error in
       if let error = error {
         completion(nil, width, height, error)
         return
       }
-
-      guard
-        let baseData = data,
-        let baseImage = UIImage(data: baseData)?.fixedOrientation(),
-        let boardImage = UIImage(data: boardData.boardImageBytes.data)?.fixedOrientation()
-      else {
+      
+      guard let baseData = data,
+            let baseImage = UIImage(data: baseData)?.fixedOrientation() else {
         completion(data, width, height, nil)
         return
       }
-
-      guard
-        let composed = DefaultCamera.composeBoard(
-          baseImage: baseImage,
+      
+      let targetWidth = CGFloat(options.targetResolution.width)
+      let targetHeight = CGFloat(options.targetResolution.height)
+      
+      // Resize base image to target
+      let resizedBase = resizeImage(baseImage, to: CGSize(width: targetWidth, height: targetHeight))
+      
+      if let boardData = options.boardData,
+         let boardImage = UIImage(data: boardData.boardImageBytes.data)?.fixedOrientation() {
+        
+        // Compose with board, passing orientation
+        if let composed = DefaultCamera.composeBoard(
+          baseImage: resizedBase,
           boardImage: boardImage,
-          boardData: boardData
-        )
-      else {
-        completion(baseData, width, height, nil)
-        return
+          boardData: boardData,
+          targetSize: CGSize(width: targetWidth, height: targetHeight)
+        ) {
+          completion(composed, Int(targetWidth), Int(targetHeight), nil)
+          return
+        }
       }
-
-      completion(composed, width, height, nil)
+      
+      // If no board or compose failed, return resized
+      let resizedData = resizedBase.jpegData(compressionQuality: 0.9)
+      completion(resizedData, Int(targetWidth), Int(targetHeight), nil)
     }
   }
 
   private static func composeBoard(
     baseImage: UIImage,
     boardImage: UIImage,
-    boardData: FCPPlatformBoardOverlayData
+    boardData: FCPPlatformBoardOverlayData,
+    targetSize: CGSize
   ) -> Data? {
-    let basePixelSize = CGSize(
-      width: baseImage.size.width * baseImage.scale,
-      height: baseImage.size.height * baseImage.scale
-    )
-
-    guard basePixelSize.width > 0, basePixelSize.height > 0 else { return nil }
-
-    let previewWidth = CGFloat(boardData.previewWidth)
-    let previewHeight = CGFloat(boardData.previewHeight)
-
-    let scale = max(basePixelSize.width / previewWidth, basePixelSize.height / previewHeight)
-    let scaledPreviewWidth = previewWidth * scale
-    let scaledPreviewHeight = previewHeight * scale
-    let offsetX = (scaledPreviewWidth - basePixelSize.width) / 2.0
-    let offsetY = (scaledPreviewHeight - basePixelSize.height) / 2.0
-
-    var boardRect = CGRect(
-      x: CGFloat(boardData.boardScreenX) * scale - offsetX,
-      y: CGFloat(boardData.boardScreenY) * scale - offsetY,
-      width: CGFloat(boardData.boardScreenWidth) * scale,
-      height: CGFloat(boardData.boardScreenHeight) * scale
-    )
-
-    let bounds = CGRect(origin: .zero, size: basePixelSize)
-    boardRect = boardRect.intersection(bounds)
-
-    guard !boardRect.isNull, boardRect.width > 0, boardRect.height > 0 else {
-      return baseImage.jpegData(compressionQuality: 0.9)
+    // First, resize base to target (assuming base is already oriented correctly)
+    let resizedBase = resizeImage(baseImage, to: targetSize)
+    
+    // Get orientation degrees
+    let degrees = CGFloat(boardData.deviceOrientationDegrees)
+    
+    // Rotate board image
+    let rotatedBoard = rotateImage(boardImage, degrees: degrees)
+    
+    // Calculate scaled board rect
+    let scale = max(targetSize.width / CGFloat(boardData.previewWidth), targetSize.height / CGFloat(boardData.previewHeight))
+    var boardX = CGFloat(boardData.boardScreenX) * scale
+    var boardY = CGFloat(boardData.boardScreenY) * scale
+    var boardW = CGFloat(boardData.boardScreenWidth) * scale
+    var boardH = CGFloat(boardData.boardScreenHeight) * scale
+    
+    // Adjust for cover offset
+    let scaledPreviewW = CGFloat(boardData.previewWidth) * scale
+    let scaledPreviewH = CGFloat(boardData.previewHeight) * scale
+    let offsetX = (scaledPreviewW - targetSize.width) / 2
+    let offsetY = (scaledPreviewH - targetSize.height) / 2
+    boardX -= offsetX
+    boardY -= offsetY
+    
+    // Now adjust rect based on orientation (since base is in target orientation, adjust board rect accordingly)
+    switch Int(degrees) {
+    case 90: // landscape left
+      // Swap and adjust
+      let temp = boardW
+      boardW = boardH
+      boardH = temp
+      let newX = boardY
+      let newY = targetSize.height - boardX - boardH
+      boardX = newX
+      boardY = newY
+    case 180: // portrait down
+      boardX = targetSize.width - boardX - boardW
+      boardY = targetSize.height - boardY - boardH
+    case 270: // landscape right
+      let temp = boardW
+      boardW = boardH
+      boardH = temp
+      let newX = targetSize.width - boardY - boardW
+      let newY = boardX
+      boardX = newX
+      boardY = newY
+    default: // 0 portrait up
+      break
     }
-
-    UIGraphicsBeginImageContextWithOptions(basePixelSize, false, 1.0)
-    baseImage.draw(in: CGRect(origin: .zero, size: basePixelSize))
-    boardImage.draw(in: boardRect)
+    
+    // Clamp to bounds
+    let boardRect = CGRect(x: boardX, y: boardY, width: boardW, height: boardH).intersection(CGRect(origin: .zero, size: targetSize))
+    if boardRect.isNull || boardRect.width <= 0 || boardRect.height <= 0 {
+      return resizedBase.jpegData(compressionQuality: 0.9)
+    }
+    
+    // Draw
+    UIGraphicsBeginImageContextWithOptions(targetSize, false, 1.0)
+    resizedBase.draw(in: CGRect(origin: .zero, size: targetSize))
+    rotatedBoard.draw(in: boardRect)
     let composed = UIGraphicsGetImageFromCurrentImageContext()
     UIGraphicsEndImageContext()
-
+    
     return composed?.jpegData(compressionQuality: 0.9)
   }
 }
@@ -548,4 +576,25 @@ private extension UIImage {
     UIGraphicsEndImageContext()
     return normalized ?? self
   }
+}
+
+private func resizeImage(_ image: UIImage, to targetSize: CGSize) -> UIImage {
+  let rect = CGRect(origin: .zero, size: targetSize)
+  UIGraphicsBeginImageContextWithOptions(targetSize, false, image.scale)
+  image.draw(in: rect)
+  let resized = UIGraphicsGetImageFromCurrentImageContext() ?? image
+  UIGraphicsEndImageContext()
+  return resized
+}
+
+private func rotateImage(_ image: UIImage, degrees: CGFloat) -> UIImage {
+  let radians = degrees * .pi / 180
+  UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+  let context = UIGraphicsGetCurrentContext()!
+  context.translateBy(x: image.size.width / 2, y: image.size.height / 2)
+  context.rotate(by: radians)
+  image.draw(in: CGRect(x: -image.size.width / 2, y: -image.size.height / 2, width: image.size.width, height: image.size.height))
+  let rotated = UIGraphicsGetImageFromCurrentImageContext() ?? image
+  UIGraphicsEndImageContext()
+  return rotated
 }

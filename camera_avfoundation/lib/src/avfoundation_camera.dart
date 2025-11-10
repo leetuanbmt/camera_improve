@@ -199,29 +199,39 @@ class AVFoundationCamera extends CameraPlatform {
   }
 
   @override
-  Future<CapturedImageData> captureToMemory(int cameraId,
-      {BoardOverlayData? boardOverlayData}) async {
+  Future<CapturedImageData> captureToMemory(
+    int cameraId, {
+    required int targetWidth,
+    required int targetHeight,
+    BoardOverlayData? boardOverlayData,
+  }) async {
     try {
-      final PlatformCapturedImageData platformData;
+      final platformOptions = PlatformCaptureOptions(
+        targetResolution: PlatformTargetResolution(
+          width: targetWidth,
+          height: targetHeight,
+        ),
+        boardData: boardOverlayData != null
+            ? PlatformBoardOverlayData(
+                boardImageBytes: boardOverlayData.boardImageBytes,
+                boardScreenX: boardOverlayData.boardScreenX,
+                boardScreenY: boardOverlayData.boardScreenY,
+                boardScreenWidth: boardOverlayData.boardScreenWidth,
+                boardScreenHeight: boardOverlayData.boardScreenHeight,
+                previewWidth: boardOverlayData.previewWidth,
+                previewHeight: boardOverlayData.previewHeight,
+                devicePixelRatio: boardOverlayData.devicePixelRatio,
+                deviceOrientationDegrees:
+                    boardOverlayData.deviceOrientationDegrees,
+                targetWidth: targetWidth,
+                targetHeight: targetHeight,
+              )
+            : null,
+      );
 
-      if (boardOverlayData != null) {
-        final platformBoardData = PlatformBoardOverlayData(
-          boardImageBytes: boardOverlayData.boardImageBytes,
-          boardScreenX: boardOverlayData.boardScreenX,
-          boardScreenY: boardOverlayData.boardScreenY,
-          boardScreenWidth: boardOverlayData.boardScreenWidth,
-          boardScreenHeight: boardOverlayData.boardScreenHeight,
-          previewWidth: boardOverlayData.previewWidth,
-          previewHeight: boardOverlayData.previewHeight,
-          devicePixelRatio: boardOverlayData.devicePixelRatio,
-          targetWidth: boardOverlayData.targetWidth,
-          targetHeight: boardOverlayData.targetHeight,
-          usePreviewFrame: boardOverlayData.usePreviewFrame,
-        );
-        platformData = await _hostApi.captureToMemoryWithBoard(platformBoardData);
-      } else {
-        platformData = await _hostApi.captureToMemory();
-      }
+      final PlatformCapturedImageData platformData =
+          await _hostApi.captureToMemory(platformOptions);
+
       return CapturedImageData(
         bytes: Uint8List.fromList(platformData.bytes),
         width: platformData.width,

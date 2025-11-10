@@ -311,6 +311,8 @@ class CameraController extends ValueNotifier<CameraValue> {
   /// Optional [boardOverlayData]: If provided, native code will process
   /// board overlay for better performance. If null, returns raw image.
   Future<CapturedImageData> captureToMemory({
+    required int targetWidth,
+    required int targetHeight,
     BoardOverlayData? boardOverlayData,
   }) async {
     if (value.isTakingPicture) {
@@ -324,6 +326,8 @@ class CameraController extends ValueNotifier<CameraValue> {
       final CapturedImageData result =
           await CameraPlatform.instance.captureToMemory(
         _cameraId,
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
         boardOverlayData: boardOverlayData,
       );
       value = value.copyWith(isTakingPicture: false);

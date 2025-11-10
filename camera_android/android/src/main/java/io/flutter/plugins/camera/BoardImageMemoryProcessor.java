@@ -65,23 +65,19 @@ public class BoardImageMemoryProcessor implements Runnable {
       Log.d(TAG, "📷 Camera buffer extracted: " + (System.currentTimeMillis() - startTime) + "ms");
 
       // 2. Extract board parameters (screen coordinates from Flutter)
-      byte[] boardBytes = (byte[]) boardData.get("boardImageBytes");
-      double boardScreenX = (Double) boardData.get("boardScreenX");
-      double boardScreenY = (Double) boardData.get("boardScreenY");
-      double boardScreenWidth = (Double) boardData.get("boardScreenWidth");
-      double boardScreenHeight = (Double) boardData.get("boardScreenHeight");
-      double previewWidth = (Double) boardData.get("previewWidth");
-      double previewHeight = (Double) boardData.get("previewHeight");
-      double devicePixelRatio = (Double) boardData.get("devicePixelRatio");
       long targetWidth = (Long) boardData.get("targetWidth");
       long targetHeight = (Long) boardData.get("targetHeight");
-      int deviceOrientationDegrees = 0;
-      Object orientationObj = boardData.get("deviceOrientationDegrees");
-      if (orientationObj instanceof Long) {
-        deviceOrientationDegrees = (int) ((Long) orientationObj).longValue();
-      } else if (orientationObj instanceof Double) {
-        deviceOrientationDegrees = (int) Math.round((Double) orientationObj);
-      }
+
+      // Board specific - optional
+      byte[] boardBytes = (byte[]) boardData.get("boardImageBytes"); // null if no board
+      double boardScreenX = boardData.containsKey("boardScreenX") ? (Double) boardData.get("boardScreenX") : 0;
+      double boardScreenY = boardData.containsKey("boardScreenY") ? (Double) boardData.get("boardScreenY") : 0;
+      double boardScreenWidth = boardData.containsKey("boardScreenWidth") ? (Double) boardData.get("boardScreenWidth") : 0;
+      double boardScreenHeight = boardData.containsKey("boardScreenHeight") ? (Double) boardData.get("boardScreenHeight") : 0;
+      double previewWidth = boardData.containsKey("previewWidth") ? (Double) boardData.get("previewWidth") : (double) image.getWidth(); // Default to actual image size if no preview info
+      double previewHeight = boardData.containsKey("previewHeight") ? (Double) boardData.get("previewHeight") : (double) image.getHeight();
+      double devicePixelRatio = boardData.containsKey("devicePixelRatio") ? (Double) boardData.get("devicePixelRatio") : 1.0;
+      int deviceOrientationDegrees = boardData.containsKey("deviceOrientationDegrees") ? ((Long) boardData.get("deviceOrientationDegrees")).intValue() : 0;
 
       Log.d(TAG, "📐 Camera (actual): " + image.getWidth() + "x" + image.getHeight());
       Log.d(TAG, "📐 Target: " + targetWidth + "x" + targetHeight);
@@ -105,12 +101,14 @@ public class BoardImageMemoryProcessor implements Runnable {
       Log.d(TAG, "✅ Camera decoded: " + (System.currentTimeMillis() - startTime) + "ms");
 
       // 4. Decode board image
-      Bitmap boardBitmap = BitmapFactory.decodeByteArray(boardBytes, 0, boardBytes.length, options);
-      if (boardBitmap == null) {
-        Log.w(TAG, "⚠️ Failed to decode board image, continuing without board");
-        boardBitmap = null;
-      } else {
-        Log.d(TAG, "✅ Board decoded: " + (System.currentTimeMillis() - startTime) + "ms");
+      Bitmap boardBitmap = null;
+      if (boardBytes != null) {
+        boardBitmap = BitmapFactory.decodeByteArray(boardBytes, 0, boardBytes.length, options);
+        if (boardBitmap == null) {
+          Log.w(TAG, "⚠️ Failed to decode board image, continuing without board");
+        } else {
+          Log.d(TAG, "✅ Board decoded: " + (System.currentTimeMillis() - startTime) + "ms");
+        }
       }
 
       // 5. Rotate board bitmap in native based on orientation

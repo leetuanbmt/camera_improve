@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:camera_example/camera_controller.dart';
+import 'package:camera_example/pdf_preview.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -187,15 +188,11 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('📊 Board capture time: ${stopwatch.elapsedMilliseconds}ms');
       }
 
-      String? finalImagePath;
-
       // Try native processing first (if board visible)
       if (_isBoardVisible && _boardScreenshotBytes != null) {
         Logger.log('⚡ Attempting native board processing...');
 
         try {
-          final quarterTurns = (_currentTurns * 4).round();
-
           /// Sử dụng bounding rect để lấy rect đã điều chỉnh sau rotation
           final boardBoundingRect = getBoundingRect(_boardKey);
           final previewBoundingRect = getBoundingRect(_previewKey);
@@ -213,9 +210,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           final pixelRatio = MediaQuery.of(context).devicePixelRatio;
           final targetResolution = resolutions[_selectedResolutionIndex];
 
-          // final boardBytes =
-          //     await rotateBoard(_boardScreenshotBytes!, quarterTurns);
-
           final boardData = BoardOverlayData(
             boardImageBytes: _boardScreenshotBytes!,
             boardScreenX: adjustedRect.left,
@@ -232,36 +226,43 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           );
 
           final image = await _controller!.captureToMemory(
+            targetWidth: targetResolution.width.toInt(),
+            targetHeight: targetResolution.height.toInt(),
             boardOverlayData: boardData,
           );
 
           // Save processed image
           final tempDir = await getTemporaryDirectory();
-          finalImagePath =
+          final finalImagePath =
               '${tempDir.path}/native_${DateTime.now().millisecondsSinceEpoch}.jpg';
-          await File(finalImagePath).writeAsBytes(image.bytes);
+          await File(finalImagePath).writeAsBytes(image.bytes, flush: true);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PdfPreview(imagePath: finalImagePath),
+            ),
+          );
+          setState(() {
+            _capturedImage = XFile(finalImagePath);
+            _isProcessing = false;
+          });
         } catch (e) {
           Logger.e('Error');
         } finally {
           Logger.log(
-              'Native board processing time: ${stopwatch.elapsedMilliseconds}ms');
+              'Native board processing time: ${stopwatch.elapsedMilliseconds} ms');
         }
       }
 
-      if (finalImagePath == null) {
-        setState(() {
-          _isProcessing = false;
-        });
-        return;
-      }
+      // if (finalImagePath == null) {
+      //   setState(() {
+      //     _isProcessing = false;
+      //   });
+      //   return;
+      // }
 
-      // finalImagePath is non-null after check
-      final String imagePath = finalImagePath;
-
-      setState(() {
-        _capturedImage = XFile(imagePath);
-        _isProcessing = false;
-      });
+      // // finalImagePath is non-null after check
+      // final String imagePath = finalImagePath;
     } catch (e) {
       Logger.log('Error capturing image: $e');
       setState(() {

@@ -109,7 +109,6 @@ class PlatformBoardOverlayData {
     required this.targetWidth,
     required this.targetHeight,
     required this.deviceOrientationDegrees,
-    this.usePreviewFrame = false,
   });
 
   final Uint8List boardImageBytes;
@@ -123,7 +122,6 @@ class PlatformBoardOverlayData {
   final int targetWidth;
   final int targetHeight;
   final int deviceOrientationDegrees;
-  final bool usePreviewFrame;
 }
 
 /// Pigeon equivalent of [ResolutionPreset].
@@ -278,22 +276,7 @@ abstract class CameraApi {
   /// as JPEG. Orientation is automatically handled based on the device's
   /// current orientation.
   @async
-  PlatformCapturedImageData captureToMemory();
-
-  /// Captures and processes image with board overlay in native code.
-  ///
-  /// If [boardOverlayData] is provided, native code will:
-  /// 1. Capture image
-  /// 2. Crop to preview visible area
-  /// 3. Merge board overlay with hardware acceleration
-  /// 4. Resize to target resolution
-  ///
-  /// This is significantly faster than processing in Dart/OpenCV.
-  /// If native processing fails, falls back to standard captureToMemory.
-  @async
-  PlatformCapturedImageData captureToMemoryWithBoard(
-    PlatformBoardOverlayData boardData,
-  );
+  PlatformCapturedImageData captureToMemory(PlatformCaptureOptions options);
 }
 
 /// Handles calls from native side to Dart that are not camera-specific.
@@ -314,4 +297,24 @@ abstract class CameraEventApi {
 
   /// Called when the camera closes.
   void closed();
+}
+
+class PlatformTargetResolution {
+  PlatformTargetResolution({
+    required this.width,
+    required this.height,
+  });
+
+  final int width;
+  final int height;
+}
+
+class PlatformCaptureOptions {
+  PlatformCaptureOptions({
+    required this.targetResolution,
+    this.boardData,
+  });
+
+  final PlatformTargetResolution targetResolution;
+  final PlatformBoardOverlayData? boardData;
 }

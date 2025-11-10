@@ -120,6 +120,8 @@ typedef NS_ENUM(NSUInteger, FCPPlatformResolutionPreset) {
 @class FCPPlatformPoint;
 @class FCPPlatformSize;
 @class FCPPlatformCapturedImageData;
+@class FCPPlatformTargetResolution;
+@class FCPPlatformCaptureOptions;
 @class FCPPlatformBoardOverlayData;
 
 @interface FCPPlatformCameraDescription : NSObject
@@ -197,6 +199,24 @@ typedef NS_ENUM(NSUInteger, FCPPlatformResolutionPreset) {
 @property(nonatomic, assign) NSInteger  height;
 @end
 
+@interface FCPPlatformTargetResolution : NSObject
+/// `init` unavailable to enforce nonnull fields, see the `make` class method.
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)makeWithWidth:(NSInteger )width
+    height:(NSInteger )height;
+@property(nonatomic, assign) NSInteger  width;
+@property(nonatomic, assign) NSInteger  height;
+@end
+
+@interface FCPPlatformCaptureOptions : NSObject
+/// `init` unavailable to enforce nonnull fields, see the `make` class method.
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)makeWithTargetResolution:(FCPPlatformTargetResolution *)targetResolution
+    boardData:(nullable FCPPlatformBoardOverlayData *)boardData;
+@property(nonatomic, strong) FCPPlatformTargetResolution * targetResolution;
+@property(nonatomic, strong, nullable) FCPPlatformBoardOverlayData * boardData;
+@end
+
 @interface FCPPlatformBoardOverlayData : NSObject
 /// `init` unavailable to enforce nonnull fields, see the `make` class method.
 - (instancetype)init NS_UNAVAILABLE;
@@ -209,8 +229,7 @@ typedef NS_ENUM(NSUInteger, FCPPlatformResolutionPreset) {
     previewHeight:(double )previewHeight
     devicePixelRatio:(double )devicePixelRatio
     targetWidth:(NSInteger )targetWidth
-    targetHeight:(NSInteger )targetHeight
-    usePreviewFrame:(BOOL )usePreviewFrame;
+    targetHeight:(NSInteger )targetHeight;
 @property(nonatomic, strong) FlutterStandardTypedData * boardImageBytes;
 @property(nonatomic, assign) double  boardScreenX;
 @property(nonatomic, assign) double  boardScreenY;
@@ -221,7 +240,6 @@ typedef NS_ENUM(NSUInteger, FCPPlatformResolutionPreset) {
 @property(nonatomic, assign) double  devicePixelRatio;
 @property(nonatomic, assign) NSInteger  targetWidth;
 @property(nonatomic, assign) NSInteger  targetHeight;
-@property(nonatomic, assign) BOOL  usePreviewFrame;
 @end
 
 /// The codec used by all APIs.
@@ -260,10 +278,7 @@ NSObject<FlutterMessageCodec> *FCPGetMessagesCodec(void);
 /// The image is captured at the camera's current resolution and compressed
 /// as JPEG. Orientation is automatically handled based on the device's
 /// current orientation.
-- (void)captureToMemory:(void (^)(FCPPlatformCapturedImageData *_Nullable, FlutterError *_Nullable))completion;
-/// Captures to memory while applying board overlay data natively.
-/// If board data requests preview frame usage, the capture uses the latest preview buffer.
-- (void)captureToMemoryWithBoard:(FCPPlatformBoardOverlayData *)boardData completion:(void (^)(FCPPlatformCapturedImageData *_Nullable, FlutterError *_Nullable))completion;
+- (void)captureToMemory:(FCPPlatformCaptureOptions *)options completion:(void (^)(FCPPlatformCapturedImageData *_Nullable, FlutterError *_Nullable))completion;
 /// Does any preprocessing necessary before beginning to record video.
 - (void)prepareForVideoRecordingWithCompletion:(void (^)(FlutterError *_Nullable))completion;
 /// Begins recording video, optionally enabling streaming to Dart at the same

@@ -23,7 +23,6 @@ class BoardOverlayData {
     required this.targetWidth,
     required this.targetHeight,
     required this.deviceOrientationDegrees,
-    this.usePreviewFrame = false,
   });
 
   /// Board image as PNG/JPEG bytes (high-DPI screenshot)
@@ -51,9 +50,6 @@ class BoardOverlayData {
   /// Device orientation in degrees (0, 90, 180, 270)
   final int deviceOrientationDegrees;
 
-  /// Whether to capture using the preview frame instead of full-resolution JPEG.
-  final bool usePreviewFrame;
-
   /// Convert to map for platform channel
   Map<String, dynamic> toMap() {
     return {
@@ -68,7 +64,6 @@ class BoardOverlayData {
       'targetWidth': targetWidth,
       'targetHeight': targetHeight,
       'deviceOrientationDegrees': deviceOrientationDegrees,
-      'usePreviewFrame': usePreviewFrame,
     };
   }
 
@@ -93,8 +88,7 @@ class BoardOverlayData {
             devicePixelRatio == other.devicePixelRatio &&
             targetWidth == other.targetWidth &&
             targetHeight == other.targetHeight &&
-            deviceOrientationDegrees == other.deviceOrientationDegrees &&
-            usePreviewFrame == other.usePreviewFrame;
+            deviceOrientationDegrees == other.deviceOrientationDegrees;
   }
 
   @override
@@ -111,7 +105,6 @@ class BoardOverlayData {
       targetWidth,
       targetHeight,
       deviceOrientationDegrees,
-      usePreviewFrame,
     );
   }
 }

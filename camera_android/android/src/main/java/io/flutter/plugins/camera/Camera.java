@@ -664,65 +664,25 @@ class Camera
     }
   }
 
-  public void captureToMemory(@NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
-    // Only take one picture at a time.
+  public void captureToMemory(@NonNull Messages.PlatformCaptureOptions options, @NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
     if (cameraCaptureCallback.getCameraState() != CameraState.STATE_PREVIEW) {
-      result.error(
-          new Messages.FlutterError(
-              "captureAlreadyActive", "Picture is currently already being captured", null));
+      result.error(new Messages.FlutterError("captureAlreadyActive", "Picture is currently already being captured", null));
       return;
     }
 
-    flutterResultMemory = result;
-    flutterResult = null;
-    captureFile = null;
-    pendingBoardData = null;
-    flutterResultMemoryWithBoard = null;
+    Messages.PlatformTargetResolution res = options.getTargetResolution();
+    Messages.PlatformBoardOverlayData board = options.getBoardData();
 
-    // Listen for picture being taken.
-    pictureImageReader.setOnImageAvailableListener(this, backgroundHandler);
-
-    final AutoFocusFeature autoFocusFeature = cameraFeatures.getAutoFocus();
-    final boolean isAutoFocusSupported = autoFocusFeature.checkIsSupported();
-    if (isAutoFocusSupported && autoFocusFeature.getValue() == FocusMode.auto) {
-      runPictureAutoFocus();
-    } else {
-      runPrecaptureSequence();
-    }
-  }
-
-  public void captureToMemoryWithBoard(
-      @NonNull Messages.PlatformBoardOverlayData boardData,
-      @NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
-    // Only take one picture at a time.
-    if (cameraCaptureCallback.getCameraState() != CameraState.STATE_PREVIEW) {
-      result.error(
-          new Messages.FlutterError(
-              "captureAlreadyActive", "Picture is currently already being captured", null));
-      return;
-    }
-
-    Log.i(TAG, "captureToMemoryWithBoard called");
-
-    Map<String, Object> boardDataMap = convertBoardDataToMap(boardData);
-    boolean usePreviewFrame =
-        Boolean.TRUE.equals(boardDataMap.get("usePreviewFrame"));
-
-    if (usePreviewFrame) {
-      capturePreviewFrameWithBoard(boardDataMap, result);
-    } else {
-      startStillCaptureWithBoard(boardDataMap, result);
-    }
-  }
-
-  private void startStillCaptureWithBoard(
-      @NonNull Map<String, Object> boardData,
-      @NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
-    pendingBoardData = boardData;
     flutterResultMemoryWithBoard = result;
-    flutterResultMemory = null;
-    flutterResult = null;
     captureFile = null;
+
+    Map<String, Object> pendingData = new HashMap<>();
+    pendingData.put("targetWidth", res.getWidth());
+    pendingData.put("targetHeight", res.getHeight());
+    if (board != null) {
+      pendingData.putAll(convertBoardDataToMap(board));
+    }
+    pendingBoardData = pendingData;
 
     pictureImageReader.setOnImageAvailableListener(this, backgroundHandler);
 
@@ -733,96 +693,6 @@ class Camera
     } else {
       runPrecaptureSequence();
     }
-  }
-
-  private void capturePreviewFrameWithBoard(
-      @NonNull Map<String, Object> boardData,
-      @NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
-    if (imageStreamReader == null) {
-      Log.w(TAG, "Preview frame reader not available");
-      result.error(
-          new Messages.FlutterError(
-              "previewUnavailable", "Preview frame reader not available", null));
-      return;
-    }
-
-    try {
-      ensurePreviewFrameSurface();
-    } catch (CameraAccessException | InterruptedException e) {
-      Log.w(TAG, "Unable to enable preview frame surface", e);
-      result.error(
-          new Messages.FlutterError(
-              "previewSurfaceError", "Unable to enable preview frame surface", e.getMessage()));
-      return;
-    }
-
-    backgroundHandler.post(
-        () -> {
-          Image previewImage = null;
-          try {
-            for (int attempt = 0; attempt < 10 && previewImage == null; attempt++) {
-              previewImage = imageStreamReader.acquireLatestImage();
-              if (previewImage == null) {
-                try {
-                  Thread.sleep(10);
-                } catch (InterruptedException ignored) {
-                  Thread.currentThread().interrupt();
-                  break;
-                }
-              }
-            }
-
-            if (previewImage == null) {
-              result.error(
-                  new Messages.FlutterError(
-                      "noPreviewFrame",
-                      "Unable to acquire preview frame (usePreviewFrame mode)",
-                      null));
-              return;
-            }
-
-            Image finalPreviewImage = previewImage;
-            previewImage = null;
-
-            BoardPreviewFrameProcessor processor =
-                new BoardPreviewFrameProcessor(
-                    finalPreviewImage,
-                    boardData,
-                    new BoardImageMemoryProcessor.Callback() {
-                      @Override
-                      public void onComplete(@NonNull byte[] bytes, int width, int height) {
-                        Messages.PlatformCapturedImageData platformData =
-                            new Messages.PlatformCapturedImageData();
-                        platformData.setBytes(bytes);
-                        platformData.setWidth((long) width);
-                        platformData.setHeight((long) height);
-                        dartMessenger.finish(result, platformData);
-                      }
-
-                      @Override
-                      public void onError(
-                          @NonNull String errorCode, @NonNull String errorMessage) {
-                        Log.e(TAG, "Preview frame processing failed: " + errorMessage);
-                        result.error(
-                            new Messages.FlutterError(
-                                errorCode,
-                                "Preview frame processing failed",
-                                errorMessage));
-                      }
-                    });
-
-            processor.run();
-          } catch (Exception e) {
-            Log.e(TAG, "Preview frame capture failed", e);
-            result.error(
-                new Messages.FlutterError(
-                    "previewException", "Preview frame capture failed", e.getMessage()));
-          } finally {
-            if (previewImage != null) {
-              previewImage.close();
-            }
-          }
-        });
   }
 
   private void ensurePreviewFrameSurface() throws CameraAccessException, InterruptedException {
@@ -850,7 +720,6 @@ class Camera
     map.put("targetWidth", data.getTargetWidth());
     map.put("targetHeight", data.getTargetHeight());
     map.put("deviceOrientationDegrees", data.getDeviceOrientationDegrees());
-    map.put("usePreviewFrame", data.getUsePreviewFrame());
     return map;
   }
 

@@ -907,19 +907,6 @@ public class Messages {
       this.deviceOrientationDegrees = setterArg;
     }
 
-    private @NonNull Boolean usePreviewFrame;
-
-    public @NonNull Boolean getUsePreviewFrame() {
-      return usePreviewFrame;
-    }
-
-    public void setUsePreviewFrame(@NonNull Boolean setterArg) {
-      if (setterArg == null) {
-        throw new IllegalStateException("Nonnull field \"usePreviewFrame\" is null.");
-      }
-      this.usePreviewFrame = setterArg;
-    }
-
     /** Constructor is non-public to enforce null safety; use Builder. */
     PlatformBoardOverlayData() {}
 
@@ -928,12 +915,12 @@ public class Messages {
       if (this == o) { return true; }
       if (o == null || getClass() != o.getClass()) { return false; }
       PlatformBoardOverlayData that = (PlatformBoardOverlayData) o;
-      return Arrays.equals(boardImageBytes, that.boardImageBytes) && boardScreenX.equals(that.boardScreenX) && boardScreenY.equals(that.boardScreenY) && boardScreenWidth.equals(that.boardScreenWidth) && boardScreenHeight.equals(that.boardScreenHeight) && previewWidth.equals(that.previewWidth) && previewHeight.equals(that.previewHeight) && devicePixelRatio.equals(that.devicePixelRatio) && targetWidth.equals(that.targetWidth) && targetHeight.equals(that.targetHeight) && deviceOrientationDegrees.equals(that.deviceOrientationDegrees) && usePreviewFrame.equals(that.usePreviewFrame);
+      return Arrays.equals(boardImageBytes, that.boardImageBytes) && boardScreenX.equals(that.boardScreenX) && boardScreenY.equals(that.boardScreenY) && boardScreenWidth.equals(that.boardScreenWidth) && boardScreenHeight.equals(that.boardScreenHeight) && previewWidth.equals(that.previewWidth) && previewHeight.equals(that.previewHeight) && devicePixelRatio.equals(that.devicePixelRatio) && targetWidth.equals(that.targetWidth) && targetHeight.equals(that.targetHeight) && deviceOrientationDegrees.equals(that.deviceOrientationDegrees);
     }
 
     @Override
     public int hashCode() {
-      int pigeonVar_result = Objects.hash(boardScreenX, boardScreenY, boardScreenWidth, boardScreenHeight, previewWidth, previewHeight, devicePixelRatio, targetWidth, targetHeight, deviceOrientationDegrees, usePreviewFrame);
+      int pigeonVar_result = Objects.hash(boardScreenX, boardScreenY, boardScreenWidth, boardScreenHeight, previewWidth, previewHeight, devicePixelRatio, targetWidth, targetHeight, deviceOrientationDegrees);
       pigeonVar_result = 31 * pigeonVar_result + Arrays.hashCode(boardImageBytes);
       return pigeonVar_result;
     }
@@ -1028,14 +1015,6 @@ public class Messages {
         return this;
       }
 
-      private @Nullable Boolean usePreviewFrame;
-
-      @CanIgnoreReturnValue
-      public @NonNull Builder setUsePreviewFrame(@NonNull Boolean setterArg) {
-        this.usePreviewFrame = setterArg;
-        return this;
-      }
-
       public @NonNull PlatformBoardOverlayData build() {
         PlatformBoardOverlayData pigeonReturn = new PlatformBoardOverlayData();
         pigeonReturn.setBoardImageBytes(boardImageBytes);
@@ -1049,14 +1028,13 @@ public class Messages {
         pigeonReturn.setTargetWidth(targetWidth);
         pigeonReturn.setTargetHeight(targetHeight);
         pigeonReturn.setDeviceOrientationDegrees(deviceOrientationDegrees);
-        pigeonReturn.setUsePreviewFrame(usePreviewFrame);
         return pigeonReturn;
       }
     }
 
     @NonNull
     ArrayList<Object> toList() {
-      ArrayList<Object> toListResult = new ArrayList<>(12);
+      ArrayList<Object> toListResult = new ArrayList<>(11);
       toListResult.add(boardImageBytes);
       toListResult.add(boardScreenX);
       toListResult.add(boardScreenY);
@@ -1068,7 +1046,6 @@ public class Messages {
       toListResult.add(targetWidth);
       toListResult.add(targetHeight);
       toListResult.add(deviceOrientationDegrees);
-      toListResult.add(usePreviewFrame);
       return toListResult;
     }
 
@@ -1096,8 +1073,6 @@ public class Messages {
       pigeonResult.setTargetHeight((Long) targetHeight);
       Object deviceOrientationDegrees = pigeonVar_list.get(10);
       pigeonResult.setDeviceOrientationDegrees((Long) deviceOrientationDegrees);
-      Object usePreviewFrame = pigeonVar_list.get(11);
-      pigeonResult.setUsePreviewFrame((Boolean) usePreviewFrame);
       return pigeonResult;
     }
   }
@@ -1260,6 +1235,179 @@ public class Messages {
     }
   }
 
+  /** Generated class from Pigeon that represents data sent in messages. */
+  public static final class PlatformTargetResolution {
+    private @NonNull Long width;
+
+    public @NonNull Long getWidth() {
+      return width;
+    }
+
+    public void setWidth(@NonNull Long setterArg) {
+      if (setterArg == null) {
+        throw new IllegalStateException("Nonnull field \"width\" is null.");
+      }
+      this.width = setterArg;
+    }
+
+    private @NonNull Long height;
+
+    public @NonNull Long getHeight() {
+      return height;
+    }
+
+    public void setHeight(@NonNull Long setterArg) {
+      if (setterArg == null) {
+        throw new IllegalStateException("Nonnull field \"height\" is null.");
+      }
+      this.height = setterArg;
+    }
+
+    /** Constructor is non-public to enforce null safety; use Builder. */
+    PlatformTargetResolution() {}
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) { return true; }
+      if (o == null || getClass() != o.getClass()) { return false; }
+      PlatformTargetResolution that = (PlatformTargetResolution) o;
+      return width.equals(that.width) && height.equals(that.height);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(width, height);
+    }
+
+    public static final class Builder {
+
+      private @Nullable Long width;
+
+      @CanIgnoreReturnValue
+      public @NonNull Builder setWidth(@NonNull Long setterArg) {
+        this.width = setterArg;
+        return this;
+      }
+
+      private @Nullable Long height;
+
+      @CanIgnoreReturnValue
+      public @NonNull Builder setHeight(@NonNull Long setterArg) {
+        this.height = setterArg;
+        return this;
+      }
+
+      public @NonNull PlatformTargetResolution build() {
+        PlatformTargetResolution pigeonReturn = new PlatformTargetResolution();
+        pigeonReturn.setWidth(width);
+        pigeonReturn.setHeight(height);
+        return pigeonReturn;
+      }
+    }
+
+    @NonNull
+    ArrayList<Object> toList() {
+      ArrayList<Object> toListResult = new ArrayList<>(2);
+      toListResult.add(width);
+      toListResult.add(height);
+      return toListResult;
+    }
+
+    static @NonNull PlatformTargetResolution fromList(@NonNull ArrayList<Object> pigeonVar_list) {
+      PlatformTargetResolution pigeonResult = new PlatformTargetResolution();
+      Object width = pigeonVar_list.get(0);
+      pigeonResult.setWidth((Long) width);
+      Object height = pigeonVar_list.get(1);
+      pigeonResult.setHeight((Long) height);
+      return pigeonResult;
+    }
+  }
+
+  /** Generated class from Pigeon that represents data sent in messages. */
+  public static final class PlatformCaptureOptions {
+    private @NonNull PlatformTargetResolution targetResolution;
+
+    public @NonNull PlatformTargetResolution getTargetResolution() {
+      return targetResolution;
+    }
+
+    public void setTargetResolution(@NonNull PlatformTargetResolution setterArg) {
+      if (setterArg == null) {
+        throw new IllegalStateException("Nonnull field \"targetResolution\" is null.");
+      }
+      this.targetResolution = setterArg;
+    }
+
+    private @Nullable PlatformBoardOverlayData boardData;
+
+    public @Nullable PlatformBoardOverlayData getBoardData() {
+      return boardData;
+    }
+
+    public void setBoardData(@Nullable PlatformBoardOverlayData setterArg) {
+      this.boardData = setterArg;
+    }
+
+    /** Constructor is non-public to enforce null safety; use Builder. */
+    PlatformCaptureOptions() {}
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) { return true; }
+      if (o == null || getClass() != o.getClass()) { return false; }
+      PlatformCaptureOptions that = (PlatformCaptureOptions) o;
+      return targetResolution.equals(that.targetResolution) && Objects.equals(boardData, that.boardData);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(targetResolution, boardData);
+    }
+
+    public static final class Builder {
+
+      private @Nullable PlatformTargetResolution targetResolution;
+
+      @CanIgnoreReturnValue
+      public @NonNull Builder setTargetResolution(@NonNull PlatformTargetResolution setterArg) {
+        this.targetResolution = setterArg;
+        return this;
+      }
+
+      private @Nullable PlatformBoardOverlayData boardData;
+
+      @CanIgnoreReturnValue
+      public @NonNull Builder setBoardData(@Nullable PlatformBoardOverlayData setterArg) {
+        this.boardData = setterArg;
+        return this;
+      }
+
+      public @NonNull PlatformCaptureOptions build() {
+        PlatformCaptureOptions pigeonReturn = new PlatformCaptureOptions();
+        pigeonReturn.setTargetResolution(targetResolution);
+        pigeonReturn.setBoardData(boardData);
+        return pigeonReturn;
+      }
+    }
+
+    @NonNull
+    ArrayList<Object> toList() {
+      ArrayList<Object> toListResult = new ArrayList<>(2);
+      toListResult.add(targetResolution);
+      toListResult.add(boardData);
+      return toListResult;
+    }
+
+    static @NonNull PlatformCaptureOptions fromList(@NonNull ArrayList<Object> pigeonVar_list) {
+      PlatformCaptureOptions pigeonResult = new PlatformCaptureOptions();
+      Object targetResolution = pigeonVar_list.get(0);
+      pigeonResult.setTargetResolution((PlatformTargetResolution) targetResolution);
+      Object boardData = pigeonVar_list.get(1);
+      pigeonResult.setBoardData((PlatformBoardOverlayData) boardData);
+      return pigeonResult;
+    }
+  }
+
   private static class PigeonCodec extends StandardMessageCodec {
     public static final PigeonCodec INSTANCE = new PigeonCodec();
 
@@ -1310,6 +1458,10 @@ public class Messages {
           return PlatformBoardOverlayData.fromList((ArrayList<Object>) readValue(buffer));
         case (byte) 142:
           return PlatformMediaSettings.fromList((ArrayList<Object>) readValue(buffer));
+        case (byte) 143:
+          return PlatformTargetResolution.fromList((ArrayList<Object>) readValue(buffer));
+        case (byte) 144:
+          return PlatformCaptureOptions.fromList((ArrayList<Object>) readValue(buffer));
         default:
           return super.readValueOfType(type, buffer);
       }
@@ -1359,6 +1511,12 @@ public class Messages {
       } else if (value instanceof PlatformMediaSettings) {
         stream.write(142);
         writeValue(stream, ((PlatformMediaSettings) value).toList());
+      } else if (value instanceof PlatformTargetResolution) {
+        stream.write(143);
+        writeValue(stream, ((PlatformTargetResolution) value).toList());
+      } else if (value instanceof PlatformCaptureOptions) {
+        stream.write(144);
+        writeValue(stream, ((PlatformCaptureOptions) value).toList());
       } else {
         super.writeValue(stream, value);
       }
@@ -1488,20 +1646,7 @@ public class Messages {
      * as JPEG. Orientation is automatically handled based on the device's
      * current orientation.
      */
-    void captureToMemory(@NonNull Result<PlatformCapturedImageData> result);
-    /**
-     * Captures and processes image with board overlay in native code.
-     *
-     * If [boardOverlayData] is provided, native code will:
-     * 1. Capture image
-     * 2. Crop to preview visible area
-     * 3. Merge board overlay with hardware acceleration
-     * 4. Resize to target resolution
-     *
-     * This is significantly faster than processing in Dart/OpenCV.
-     * If native processing fails, falls back to standard captureToMemory.
-     */
-    void captureToMemoryWithBoard(@NonNull PlatformBoardOverlayData boardData, @NonNull Result<PlatformCapturedImageData> result);
+    void captureToMemory(@NonNull PlatformCaptureOptions options, @NonNull Result<PlatformCapturedImageData> result);
 
     /** The codec used by CameraApi. */
     static @NonNull MessageCodec<Object> getCodec() {
@@ -2182,35 +2327,8 @@ public class Messages {
           channel.setMessageHandler(
               (message, reply) -> {
                 ArrayList<Object> wrapped = new ArrayList<>();
-                Result<PlatformCapturedImageData> resultCallback =
-                    new Result<PlatformCapturedImageData>() {
-                      public void success(PlatformCapturedImageData result) {
-                        wrapped.add(0, result);
-                        reply.reply(wrapped);
-                      }
-
-                      public void error(Throwable error) {
-                        ArrayList<Object> wrappedError = wrapError(error);
-                        reply.reply(wrappedError);
-                      }
-                    };
-
-                api.captureToMemory(resultCallback);
-              });
-        } else {
-          channel.setMessageHandler(null);
-        }
-      }
-      {
-        BasicMessageChannel<Object> channel =
-            new BasicMessageChannel<>(
-                binaryMessenger, "dev.flutter.pigeon.camera_android.CameraApi.captureToMemoryWithBoard" + messageChannelSuffix, getCodec());
-        if (api != null) {
-          channel.setMessageHandler(
-              (message, reply) -> {
-                ArrayList<Object> wrapped = new ArrayList<>();
                 ArrayList<Object> args = (ArrayList<Object>) message;
-                PlatformBoardOverlayData boardDataArg = (PlatformBoardOverlayData) args.get(0);
+                PlatformCaptureOptions optionsArg = (PlatformCaptureOptions) args.get(0);
                 Result<PlatformCapturedImageData> resultCallback =
                     new Result<PlatformCapturedImageData>() {
                       public void success(PlatformCapturedImageData result) {
@@ -2224,7 +2342,7 @@ public class Messages {
                       }
                     };
 
-                api.captureToMemoryWithBoard(boardDataArg, resultCallback);
+                api.captureToMemory(optionsArg, resultCallback);
               });
         } else {
           channel.setMessageHandler(null);

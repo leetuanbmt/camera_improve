@@ -256,7 +256,6 @@ class PlatformBoardOverlayData {
     required this.targetWidth,
     required this.targetHeight,
     required this.deviceOrientationDegrees,
-    this.usePreviewFrame = false,
   });
 
   Uint8List boardImageBytes;
@@ -281,8 +280,6 @@ class PlatformBoardOverlayData {
 
   int deviceOrientationDegrees;
 
-  bool usePreviewFrame;
-
   Object encode() {
     return <Object?>[
       boardImageBytes,
@@ -296,7 +293,6 @@ class PlatformBoardOverlayData {
       targetWidth,
       targetHeight,
       deviceOrientationDegrees,
-      usePreviewFrame,
     ];
   }
 
@@ -314,7 +310,6 @@ class PlatformBoardOverlayData {
       targetWidth: result[8]! as int,
       targetHeight: result[9]! as int,
       deviceOrientationDegrees: result[10]! as int,
-      usePreviewFrame: result[11]! as bool,
     );
   }
 }
@@ -357,6 +352,58 @@ class PlatformMediaSettings {
       videoBitrate: result[2] as int?,
       audioBitrate: result[3] as int?,
       enableAudio: result[4]! as bool,
+    );
+  }
+}
+
+class PlatformTargetResolution {
+  PlatformTargetResolution({
+    required this.width,
+    required this.height,
+  });
+
+  int width;
+
+  int height;
+
+  Object encode() {
+    return <Object?>[
+      width,
+      height,
+    ];
+  }
+
+  static PlatformTargetResolution decode(Object result) {
+    result as List<Object?>;
+    return PlatformTargetResolution(
+      width: result[0]! as int,
+      height: result[1]! as int,
+    );
+  }
+}
+
+class PlatformCaptureOptions {
+  PlatformCaptureOptions({
+    required this.targetResolution,
+    this.boardData,
+  });
+
+  PlatformTargetResolution targetResolution;
+
+  PlatformBoardOverlayData? boardData;
+
+  Object encode() {
+    return <Object?>[
+      targetResolution,
+      boardData,
+    ];
+  }
+
+  static PlatformCaptureOptions decode(Object result) {
+    result as List<Object?>;
+    return PlatformCaptureOptions(
+      targetResolution: result[0]! as PlatformTargetResolution,
+      boardData: result[1] as PlatformBoardOverlayData?,
     );
   }
 }
@@ -411,6 +458,12 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is PlatformMediaSettings) {
       buffer.putUint8(142);
       writeValue(buffer, value.encode());
+    }    else if (value is PlatformTargetResolution) {
+      buffer.putUint8(143);
+      writeValue(buffer, value.encode());
+    }    else if (value is PlatformCaptureOptions) {
+      buffer.putUint8(144);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -454,6 +507,10 @@ class _PigeonCodec extends StandardMessageCodec {
         return PlatformBoardOverlayData.decode(readValue(buffer)!);
       case 142: 
         return PlatformMediaSettings.decode(readValue(buffer)!);
+      case 143: 
+        return PlatformTargetResolution.decode(readValue(buffer)!);
+      case 144: 
+        return PlatformCaptureOptions.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -1183,7 +1240,7 @@ class CameraApi {
   /// The image is captured at the camera's current resolution and compressed
   /// as JPEG. Orientation is automatically handled based on the device's
   /// current orientation.
-  Future<PlatformCapturedImageData> captureToMemory() async {
+  Future<PlatformCapturedImageData> captureToMemory(PlatformCaptureOptions options) async {
     final String pigeonVar_channelName = 'dev.flutter.pigeon.camera_android.CameraApi.captureToMemory$pigeonVar_messageChannelSuffix';
     final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
@@ -1191,44 +1248,7 @@ class CameraApi {
       binaryMessenger: pigeonVar_binaryMessenger,
     );
     final List<Object?>? pigeonVar_replyList =
-        await pigeonVar_channel.send(null) as List<Object?>?;
-    if (pigeonVar_replyList == null) {
-      throw _createConnectionError(pigeonVar_channelName);
-    } else if (pigeonVar_replyList.length > 1) {
-      throw PlatformException(
-        code: pigeonVar_replyList[0]! as String,
-        message: pigeonVar_replyList[1] as String?,
-        details: pigeonVar_replyList[2],
-      );
-    } else if (pigeonVar_replyList[0] == null) {
-      throw PlatformException(
-        code: 'null-error',
-        message: 'Host platform returned null value for non-null return value.',
-      );
-    } else {
-      return (pigeonVar_replyList[0] as PlatformCapturedImageData?)!;
-    }
-  }
-
-  /// Captures and processes image with board overlay in native code.
-  ///
-  /// If [boardOverlayData] is provided, native code will:
-  /// 1. Capture image
-  /// 2. Crop to preview visible area
-  /// 3. Merge board overlay with hardware acceleration
-  /// 4. Resize to target resolution
-  ///
-  /// This is significantly faster than processing in Dart/OpenCV.
-  /// If native processing fails, falls back to standard captureToMemory.
-  Future<PlatformCapturedImageData> captureToMemoryWithBoard(PlatformBoardOverlayData boardData) async {
-    final String pigeonVar_channelName = 'dev.flutter.pigeon.camera_android.CameraApi.captureToMemoryWithBoard$pigeonVar_messageChannelSuffix';
-    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
-      pigeonVar_channelName,
-      pigeonChannelCodec,
-      binaryMessenger: pigeonVar_binaryMessenger,
-    );
-    final List<Object?>? pigeonVar_replyList =
-        await pigeonVar_channel.send(<Object?>[boardData]) as List<Object?>?;
+        await pigeonVar_channel.send(<Object?>[options]) as List<Object?>?;
     if (pigeonVar_replyList == null) {
       throw _createConnectionError(pigeonVar_channelName);
     } else if (pigeonVar_replyList.length > 1) {

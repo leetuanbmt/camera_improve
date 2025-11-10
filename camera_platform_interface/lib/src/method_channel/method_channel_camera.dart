@@ -249,8 +249,12 @@ class MethodChannelCamera extends CameraPlatform {
   }
 
   @override
-  Future<CapturedImageData> captureToMemory(int cameraId,
-      {BoardOverlayData? boardOverlayData}) async {
+  Future<CapturedImageData> captureToMemory(
+    int cameraId, {
+    required int targetWidth,
+    required int targetHeight,
+    BoardOverlayData? boardOverlayData,
+  }) async {
     // This method is implemented by platform-specific implementations.
     // MethodChannelCamera is the default fallback, but Android and iOS
     // should override this method.

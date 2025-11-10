@@ -176,15 +176,8 @@ final class CameraApiImpl implements Messages.CameraApi {
   }
 
   @Override
-  public void captureToMemory(@NonNull Messages.Result<Messages.PlatformCapturedImageData> result) {
-    camera.captureToMemory(result);
-  }
-
-  @Override
-  public void captureToMemoryWithBoard(
-      @NonNull Messages.PlatformBoardOverlayData boardData,
-      @NonNull Messages.Result<Messages.PlatformCapturedImageData> result) {
-    camera.captureToMemoryWithBoard(boardData, result);
+  public void captureToMemory(@NonNull Messages.PlatformCaptureOptions options, @NonNull Messages.Result<Messages.PlatformCapturedImageData> result) {
+   camera.captureToMemory(options, result);
   }
 
   @Override

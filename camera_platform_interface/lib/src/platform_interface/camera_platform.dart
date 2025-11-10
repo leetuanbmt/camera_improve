@@ -12,6 +12,8 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import '../../camera_platform_interface.dart';
 import '../method_channel/method_channel_camera.dart';
+import '../types/board_overlay_data.dart';
+import '../types/captured_image_data.dart';
 
 /// The interface that implementations of camera must implement.
 ///
@@ -134,21 +136,12 @@ abstract class CameraPlatform extends PlatformInterface {
     throw UnimplementedError('takePicture() is not implemented.');
   }
 
-  /// Captures a picture directly to memory as JPEG format.
-  /// Returns the image data as bytes without saving to a temporary file.
-  ///
-  /// The image is captured at the camera's current resolution and compressed
-  /// as JPEG. Orientation is automatically handled based on the device's
-  /// current orientation.
-  ///
-  /// Returns a [CapturedImageData] containing the JPEG bytes and the image
-  /// dimensions (width and height).
-  ///
-  /// Optional [boardOverlayData] enables native board processing:
-  /// - If provided: Native code will merge board and resize in one pass (faster)
-  /// - If null: Returns raw camera image (fallback to Flutter processing)
+  /// Captures an image to memory with optional board overlay and required target resolution.
+  /// Returns CapturedImageData with bytes, width, height.
   Future<CapturedImageData> captureToMemory(
     int cameraId, {
+    required int targetWidth,
+    required int targetHeight,
     BoardOverlayData? boardOverlayData,
   }) {
     throw UnimplementedError('captureToMemory() is not implemented.');

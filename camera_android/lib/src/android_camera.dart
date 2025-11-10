@@ -196,36 +196,37 @@ class AndroidCamera extends CameraPlatform {
   @override
   Future<CapturedImageData> captureToMemory(
     int cameraId, {
+    required int targetWidth,
+    required int targetHeight,
     BoardOverlayData? boardOverlayData,
   }) async {
     try {
-      final PlatformCapturedImageData platformData;
+      final platformOptions = PlatformCaptureOptions(
+        targetResolution: PlatformTargetResolution(
+          width: targetWidth,
+          height: targetHeight,
+        ),
+        boardData: boardOverlayData != null
+            ? PlatformBoardOverlayData(
+                boardImageBytes: boardOverlayData.boardImageBytes,
+                boardScreenX: boardOverlayData.boardScreenX,
+                boardScreenY: boardOverlayData.boardScreenY,
+                boardScreenWidth: boardOverlayData.boardScreenWidth,
+                boardScreenHeight: boardOverlayData.boardScreenHeight,
+                previewWidth: boardOverlayData.previewWidth,
+                previewHeight: boardOverlayData.previewHeight,
+                devicePixelRatio: boardOverlayData.devicePixelRatio,
+                deviceOrientationDegrees:
+                    boardOverlayData.deviceOrientationDegrees,
+                targetWidth: targetWidth,
+                targetHeight: targetHeight,
+              )
+            : null,
+      );
 
-      if (boardOverlayData != null) {
-        // Use native board processing
-        final platformBoardData = PlatformBoardOverlayData(
-          boardImageBytes: boardOverlayData.boardImageBytes,
-          boardScreenX: boardOverlayData.boardScreenX,
-          boardScreenY: boardOverlayData.boardScreenY,
-          boardScreenWidth: boardOverlayData.boardScreenWidth,
-          boardScreenHeight: boardOverlayData.boardScreenHeight,
-          previewWidth: boardOverlayData.previewWidth,
-          previewHeight: boardOverlayData.previewHeight,
-          devicePixelRatio: boardOverlayData.devicePixelRatio,
-          targetWidth: boardOverlayData.targetWidth,
-          targetHeight: boardOverlayData.targetHeight,
-          deviceOrientationDegrees: boardOverlayData.deviceOrientationDegrees,
-          usePreviewFrame: boardOverlayData.usePreviewFrame,
-        );
+      final PlatformCapturedImageData platformData =
+          await _hostApi.captureToMemory(platformOptions);
 
-        platformData =
-            await _hostApi.captureToMemoryWithBoard(platformBoardData);
-      } else {
-        // Fallback to standard capture
-        platformData = await _hostApi.captureToMemory();
-      }
-
-      // platformData.bytes is already Uint8List, no need to convert
       return CapturedImageData(
         bytes: platformData.bytes,
         width: platformData.width,

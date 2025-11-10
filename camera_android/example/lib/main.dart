@@ -1036,20 +1036,20 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     }
 
     try {
-      final stopwatch = Stopwatch()..start();
-      final data = await cameraController.captureToMemory();
-      Logger.log('captureToMemory took ${stopwatch.elapsedMilliseconds} ms');
-      print('data: ${data.width}');
-      print('data: ${data.height}');
-      showDialog(
-          context: context,
-          builder: (BuildContext context) {
-            return AlertDialog(
-              title: Text('Picture'),
-              content: Image.memory(data.bytes),
-            );
-          });
-      return null;
+      // final stopwatch = Stopwatch()..start();
+      // final data = await cameraController.captureToMemory();
+      // Logger.log('captureToMemory took ${stopwatch.elapsedMilliseconds} ms');
+      // print('data: ${data.width}');
+      // print('data: ${data.height}');
+      // showDialog(
+      //     context: context,
+      //     builder: (BuildContext context) {
+      //       return AlertDialog(
+      //         title: Text('Picture'),
+      //         content: Image.memory(data.bytes),
+      //       );
+      //     });
+      // return null;
     } on CameraException catch (e) {
       _showCameraException(e);
       return null;

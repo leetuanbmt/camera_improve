@@ -151,6 +151,18 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
 - (NSArray<id> *)toList;
 @end
 
+@interface FCPPlatformTargetResolution ()
++ (FCPPlatformTargetResolution *)fromList:(NSArray<id> *)list;
++ (nullable FCPPlatformTargetResolution *)nullableFromList:(NSArray<id> *)list;
+- (NSArray<id> *)toList;
+@end
+
+@interface FCPPlatformCaptureOptions ()
++ (FCPPlatformCaptureOptions *)fromList:(NSArray<id> *)list;
++ (nullable FCPPlatformCaptureOptions *)nullableFromList:(NSArray<id> *)list;
+- (NSArray<id> *)toList;
+@end
+
 @interface FCPPlatformBoardOverlayData ()
 + (FCPPlatformBoardOverlayData *)fromList:(NSArray<id> *)list;
 + (nullable FCPPlatformBoardOverlayData *)nullableFromList:(NSArray<id> *)list;
@@ -339,6 +351,56 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
 }
 @end
 
+@implementation FCPPlatformTargetResolution
++ (instancetype)makeWithWidth:(NSInteger )width
+    height:(NSInteger )height {
+  FCPPlatformTargetResolution* pigeonResult = [[FCPPlatformTargetResolution alloc] init];
+  pigeonResult.width = width;
+  pigeonResult.height = height;
+  return pigeonResult;
+}
++ (FCPPlatformTargetResolution *)fromList:(NSArray<id> *)list {
+  FCPPlatformTargetResolution *pigeonResult = [[FCPPlatformTargetResolution alloc] init];
+  pigeonResult.width = [GetNullableObjectAtIndex(list, 0) integerValue];
+  pigeonResult.height = [GetNullableObjectAtIndex(list, 1) integerValue];
+  return pigeonResult;
+}
++ (nullable FCPPlatformTargetResolution *)nullableFromList:(NSArray<id> *)list {
+  return (list) ? [FCPPlatformTargetResolution fromList:list] : nil;
+}
+- (NSArray<id> *)toList {
+  return @[
+    @(self.width),
+    @(self.height),
+  ];
+}
+@end
+
+@implementation FCPPlatformCaptureOptions
++ (instancetype)makeWithTargetResolution:(FCPPlatformTargetResolution *)targetResolution
+    boardData:(nullable FCPPlatformBoardOverlayData *)boardData {
+  FCPPlatformCaptureOptions* pigeonResult = [[FCPPlatformCaptureOptions alloc] init];
+  pigeonResult.targetResolution = targetResolution;
+  pigeonResult.boardData = boardData;
+  return pigeonResult;
+}
++ (FCPPlatformCaptureOptions *)fromList:(NSArray<id> *)list {
+  FCPPlatformCaptureOptions *pigeonResult = [[FCPPlatformCaptureOptions alloc] init];
+  pigeonResult.targetResolution = GetNullableObjectAtIndex(list, 0);
+  pigeonResult.boardData = GetNullableObjectAtIndex(list, 1);
+  return pigeonResult;
+}
++ (nullable FCPPlatformCaptureOptions *)nullableFromList:(NSArray<id> *)list {
+  return (list) ? [FCPPlatformCaptureOptions fromList:list] : nil;
+}
+- (NSArray<id> *)toList {
+  return @[
+    self.targetResolution ?: [NSNull null],
+    self.boardData ?: [NSNull null],
+  ];
+}
+@end
+
 @implementation FCPPlatformBoardOverlayData
 + (instancetype)makeWithBoardImageBytes:(FlutterStandardTypedData *)boardImageBytes
     boardScreenX:(double )boardScreenX
@@ -349,8 +411,7 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
     previewHeight:(double )previewHeight
     devicePixelRatio:(double )devicePixelRatio
     targetWidth:(NSInteger )targetWidth
-    targetHeight:(NSInteger )targetHeight
-    usePreviewFrame:(BOOL )usePreviewFrame {
+    targetHeight:(NSInteger )targetHeight {
   FCPPlatformBoardOverlayData* pigeonResult = [[FCPPlatformBoardOverlayData alloc] init];
   pigeonResult.boardImageBytes = boardImageBytes;
   pigeonResult.boardScreenX = boardScreenX;
@@ -362,7 +423,6 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
   pigeonResult.devicePixelRatio = devicePixelRatio;
   pigeonResult.targetWidth = targetWidth;
   pigeonResult.targetHeight = targetHeight;
-  pigeonResult.usePreviewFrame = usePreviewFrame;
   return pigeonResult;
 }
 + (FCPPlatformBoardOverlayData *)fromList:(NSArray<id> *)list {
@@ -377,7 +437,6 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
   pigeonResult.devicePixelRatio = [GetNullableObjectAtIndex(list, 7) doubleValue];
   pigeonResult.targetWidth = [GetNullableObjectAtIndex(list, 8) integerValue];
   pigeonResult.targetHeight = [GetNullableObjectAtIndex(list, 9) integerValue];
-  pigeonResult.usePreviewFrame = [GetNullableObjectAtIndex(list, 10) boolValue];
   return pigeonResult;
 }
 + (nullable FCPPlatformBoardOverlayData *)nullableFromList:(NSArray<id> *)list {
@@ -395,7 +454,6 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
     @(self.devicePixelRatio),
     @(self.targetWidth),
     @(self.targetHeight),
-    @(self.usePreviewFrame),
   ];
 }
 @end
@@ -449,9 +507,12 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
       return [FCPPlatformSize fromList:[self readValue]];
     case 142: 
       return [FCPPlatformCapturedImageData fromList:[self readValue]];
-    case 143: {
+    case 143: 
+      return [FCPPlatformTargetResolution fromList:[self readValue]];
+    case 144: 
+      return [FCPPlatformCaptureOptions fromList:[self readValue]];
+    case 145: 
       return [FCPPlatformBoardOverlayData fromList:[self readValue]];
-    }
     default:
       return [super readValueOfType:type];
   }
@@ -512,8 +573,14 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
   } else if ([value isKindOfClass:[FCPPlatformCapturedImageData class]]) {
     [self writeByte:142];
     [self writeValue:[value toList]];
-  } else if ([value isKindOfClass:[FCPPlatformBoardOverlayData class]]) {
+  } else if ([value isKindOfClass:[FCPPlatformTargetResolution class]]) {
     [self writeByte:143];
+    [self writeValue:[value toList]];
+  } else if ([value isKindOfClass:[FCPPlatformCaptureOptions class]]) {
+    [self writeByte:144];
+    [self writeValue:[value toList]];
+  } else if ([value isKindOfClass:[FCPPlatformBoardOverlayData class]]) {
+    [self writeByte:145];
     [self writeValue:[value toList]];
   } else {
     [super writeValue:value];
@@ -758,9 +825,11 @@ void SetUpFCPCameraApiWithSuffix(id<FlutterBinaryMessenger> binaryMessenger, NSO
         binaryMessenger:binaryMessenger
         codec:FCPGetMessagesCodec()];
     if (api) {
-      NSCAssert([api respondsToSelector:@selector(captureToMemory:)], @"FCPCameraApi api (%@) doesn't respond to @selector(captureToMemory:)", api);
+      NSCAssert([api respondsToSelector:@selector(captureToMemory:completion:)], @"FCPCameraApi api (%@) doesn't respond to @selector(captureToMemory:completion:)", api);
       [channel setMessageHandler:^(id _Nullable message, FlutterReply callback) {
-        [api captureToMemory:^(FCPPlatformCapturedImageData *_Nullable output, FlutterError *_Nullable error) {
+        NSArray<id> *args = message;
+        FCPPlatformCaptureOptions *arg_options = GetNullableObjectAtIndex(args, 0);
+        [api captureToMemory:arg_options completion:^(FCPPlatformCapturedImageData *_Nullable output, FlutterError *_Nullable error) {
           callback(wrapResult(output, error));
         }];
       }];
@@ -1153,30 +1222,6 @@ void SetUpFCPCameraApiWithSuffix(id<FlutterBinaryMessenger> binaryMessenger, NSO
         FCPPlatformImageFileFormat arg_format = boxedFCPPlatformImageFileFormat.value;
         [api setImageFileFormat:arg_format completion:^(FlutterError *_Nullable error) {
           callback(wrapResult(nil, error));
-        }];
-      }];
-    } else {
-      [channel setMessageHandler:nil];
-    }
-  }
-  {
-    FlutterBasicMessageChannel *channel =
-        [[FlutterBasicMessageChannel alloc]
-            initWithName:[NSString stringWithFormat:@"dev.flutter.pigeon.camera_avfoundation.CameraApi.captureToMemoryWithBoard%@", messageChannelSuffix]
-          binaryMessenger:binaryMessenger
-          codec:FCPGetMessagesCodec()];
-    if (api) {
-      NSCAssert([api respondsToSelector:@selector(captureToMemoryWithBoard:completion:)],
-                "FCPCameraApi api (%@) doesn't respond to @selector(captureToMemoryWithBoard:completion:)", api);
-      [channel setMessageHandler:^(id _Nullable message, FlutterReply reply) {
-        NSArray *args = message;
-        FCPPlatformBoardOverlayData *boardArg = [FCPPlatformBoardOverlayData nullableFromList:GetNullableObjectAtIndex(args, 0)];
-        [api captureToMemoryWithBoard:boardArg completion:^(FCPPlatformCapturedImageData *_Nullable output, FlutterError *_Nullable error) {
-          if (error) {
-            reply(@[ error.code ?: [NSNull null], error.message ?: [NSNull null], error.details ?: [NSNull null] ]);
-          } else {
-            reply(@[ output ?: [NSNull null] ]);
-          }
         }];
       }];
     } else {

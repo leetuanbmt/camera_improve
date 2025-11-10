@@ -9,7 +9,6 @@ import 'package:camera_example/camera_controller.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:opencv_core/opencv.dart' as cv;
 import 'package:path_provider/path_provider.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -166,34 +165,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     }
   }
 
-  Future<Uint8List> rotateBoard(Uint8List boardBytes, int quarterTurns) async {
-    final turns = quarterTurns % 4;
-    int rotateCode;
-    switch (turns) {
-      case 0:
-        return boardBytes;
-      case 1:
-        rotateCode = cv.ROTATE_90_CLOCKWISE;
-        break;
-      case 2:
-        rotateCode = cv.ROTATE_180;
-        break;
-      case 3:
-        rotateCode = cv.ROTATE_90_COUNTERCLOCKWISE;
-        break;
-      default:
-        return boardBytes;
-    }
-
-    final boardMat = cv.imdecode(boardBytes, cv.IMREAD_UNCHANGED);
-    final rotatedMat = cv.rotate(boardMat, rotateCode);
-    final (success, encoded) = cv.imencode('.jpg', rotatedMat);
-    if (!success) {
-      throw Exception('Failed to encode rotated board');
-    }
-    return encoded;
-  }
-
   // ============================================================================
   // CAPTURE FUNCTIONS
   // ============================================================================
@@ -223,7 +194,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('⚡ Attempting native board processing...');
 
         try {
-          final stopWatch = Stopwatch()..start();
           final quarterTurns = (_currentTurns * 4).round();
 
           /// Sử dụng bounding rect để lấy rect đã điều chỉnh sau rotation
@@ -243,11 +213,11 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           final pixelRatio = MediaQuery.of(context).devicePixelRatio;
           final targetResolution = resolutions[_selectedResolutionIndex];
 
-          final boardBytes =
-              await rotateBoard(_boardScreenshotBytes!, quarterTurns);
+          // final boardBytes =
+          //     await rotateBoard(_boardScreenshotBytes!, quarterTurns);
 
           final boardData = BoardOverlayData(
-            boardImageBytes: boardBytes,
+            boardImageBytes: _boardScreenshotBytes!,
             boardScreenX: adjustedRect.left,
             boardScreenY: adjustedRect.top,
             boardScreenWidth: adjustedRect.width,

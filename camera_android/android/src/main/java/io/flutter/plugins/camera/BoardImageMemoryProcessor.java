@@ -113,7 +113,17 @@ public class BoardImageMemoryProcessor implements Runnable {
         Log.d(TAG, "✅ Board decoded: " + (System.currentTimeMillis() - startTime) + "ms");
       }
 
-      // 5. Detect rotation (but DON'T rotate yet - optimize by rotating after resize)
+      // 5. Rotate board bitmap in native based on orientation
+      if (boardBitmap != null) {
+        Matrix matrix = new Matrix();
+        matrix.postRotate(deviceOrientationDegrees);
+        Bitmap rotatedBoard = Bitmap.createBitmap(boardBitmap, 0, 0, boardBitmap.getWidth(), boardBitmap.getHeight(), matrix, true);
+        boardBitmap.recycle();
+        boardBitmap = rotatedBoard;
+        Log.d(TAG, "🔄 Board rotated " + deviceOrientationDegrees + "°: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());
+      }
+
+      // 6. Detect rotation (but DON'T rotate yet - optimize by rotating after resize)
       int actualCameraWidth = cameraBitmap.getWidth();
       int actualCameraHeight = cameraBitmap.getHeight();
       boolean isCameraLandscape = actualCameraWidth > actualCameraHeight;
@@ -128,7 +138,7 @@ public class BoardImageMemoryProcessor implements Runnable {
         Log.d(TAG, "🔄 Rotation detected - will resize first, then rotate (optimization)");
       }
 
-      // 6. Resize camera to target resolution FIRST (before rotation - much faster!)
+      // 7. Resize camera to target resolution FIRST (before rotation - much faster!)
       float scaleToFillW = (float) targetWidth / cameraBitmap.getWidth();
       float scaleToFillH = (float) targetHeight / cameraBitmap.getHeight();
       float fillScale = Math.max(scaleToFillW, scaleToFillH);
@@ -141,7 +151,7 @@ public class BoardImageMemoryProcessor implements Runnable {
       Bitmap resizedBitmap = Bitmap.createScaledBitmap(cameraBitmap, resizedW, resizedH, true);
       cameraBitmap.recycle();
 
-      // 7. Center crop to target size (still landscape orientation)
+      // 8. Center crop to target size (still landscape orientation)
       Bitmap croppedBitmap;
       int cropOffsetX = 0;
       int cropOffsetY = 0;
@@ -161,7 +171,7 @@ public class BoardImageMemoryProcessor implements Runnable {
 
       Log.d(TAG, "✅ Resize complete: " + (System.currentTimeMillis() - startTime) + "ms");
 
-      // 8. Rotate if needed (BEFORE merging board - so board stays correct orientation!)
+      // 9. Rotate if needed (BEFORE merging board - so board stays correct orientation!)
       Bitmap orientedBitmap;
       if (needsRotation) {
         Log.d(TAG, "🔄 Rotating resized image 90° CW: " + croppedBitmap.getWidth() + "x" + croppedBitmap.getHeight());
@@ -179,7 +189,7 @@ public class BoardImageMemoryProcessor implements Runnable {
         orientedBitmap = croppedBitmap;
       }
 
-      // 9. Merge board - ĐƠN GIẢN HÓA: Board đã được xoay trong Flutter bằng RotatedBox
+      // 10. Merge board
       Bitmap finalBitmap = orientedBitmap;
 
       if (boardBitmap != null) {
@@ -265,7 +275,7 @@ public class BoardImageMemoryProcessor implements Runnable {
         boardBitmap.recycle();
       }
 
-      // 10. Encode to JPEG
+      // 11. Encode to JPEG
       int estimatedCapacity = finalBitmap.getWidth() * finalBitmap.getHeight() / 10;
       ByteArrayOutputStream outputStream = new ByteArrayOutputStream(estimatedCapacity);
       boolean compressed = finalBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream);

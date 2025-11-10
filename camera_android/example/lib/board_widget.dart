@@ -22,7 +22,6 @@ class BoardWidget extends StatefulWidget {
     this.initialPosition,
     this.initialSize,
     this.opacity = 1.0,
-    this.rotationTurns = 0.0,
   });
 
   final ScreenshotController screenshotController;
@@ -31,7 +30,6 @@ class BoardWidget extends StatefulWidget {
   final Offset? initialPosition;
   final Size? initialSize;
   final double opacity;
-  final double rotationTurns;
   final GlobalKey boardKey;
   @override
   State<BoardWidget> createState() => _BoardWidgetState();
@@ -73,96 +71,93 @@ class _BoardWidgetState extends State<BoardWidget> {
               });
               widget.onPositionChanged?.call(_position);
             },
-            child: RotatedBox(
-              quarterTurns: (widget.rotationTurns * 4).round(),
-              child: Container(
-                width: _size.width,
-                height: _size.height,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(widget.opacity * 0.8),
-                  border: Border.all(color: Colors.white, width: 2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Stack(
-                  children: [
-                    // Background
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            Colors.grey.shade900.withOpacity(widget.opacity),
-                            Colors.grey.shade800.withOpacity(widget.opacity),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(6),
+            child: Container(
+              width: _size.width,
+              height: _size.height,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(widget.opacity * 0.8),
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Stack(
+                children: [
+                  // Background
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Colors.grey.shade900.withOpacity(widget.opacity),
+                          Colors.grey.shade800.withOpacity(widget.opacity),
+                        ],
                       ),
+                      borderRadius: BorderRadius.circular(6),
                     ),
+                  ),
 
-                    // Labels
-                    Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: _labels.map((label) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8.0),
-                            child: Row(
-                              children: [
-                                Text(
-                                  '${label.text}: ',
-                                  style: TextStyle(
-                                    color: Colors.white
-                                        .withOpacity(widget.opacity),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                  // Labels
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _labels.map((label) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Row(
+                            children: [
+                              Text(
+                                '${label.text}: ',
+                                style: TextStyle(
+                                  color:
+                                      Colors.white.withOpacity(widget.opacity),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                Text(
-                                  label.value,
-                                  style: TextStyle(
-                                    color: Colors.white
-                                        .withOpacity(widget.opacity),
-                                    fontSize: 14,
-                                  ),
+                              ),
+                              Text(
+                                label.value,
+                                style: TextStyle(
+                                  color:
+                                      Colors.white.withOpacity(widget.opacity),
+                                  fontSize: 14,
                                 ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
                     ),
+                  ),
 
-                    // Drag indicator
-                    Positioned(
-                      bottom: 4,
-                      right: 4,
-                      child: Icon(
-                        Icons.drag_indicator,
-                        color: Colors.white.withOpacity(widget.opacity * 0.5),
+                  // Drag indicator
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Icon(
+                      Icons.drag_indicator,
+                      color: Colors.white.withOpacity(widget.opacity * 0.5),
+                      size: 20,
+                    ),
+                  ),
+
+                  // Edit button
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.edit,
+                        color: Colors.white.withOpacity(widget.opacity),
                         size: 20,
                       ),
+                      onPressed: () {
+                        // TODO: Open edit dialog
+                        _showEditDialog();
+                      },
                     ),
-
-                    // Edit button
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: IconButton(
-                        icon: Icon(
-                          Icons.edit,
-                          color: Colors.white.withOpacity(widget.opacity),
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          // TODO: Open edit dialog
-                          _showEditDialog();
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

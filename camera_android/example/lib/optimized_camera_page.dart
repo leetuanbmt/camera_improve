@@ -77,13 +77,30 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   final GlobalKey _previewKey = GlobalKey();
 
   final GlobalKey _boardKey = GlobalKey();
-  Rect getBoardRect(GlobalKey boardKey) {
-    final renderBox = boardKey.currentContext?.findRenderObject() as RenderBox?;
+
+  Rect getBoundingRect(GlobalKey key) {
+    final renderBox = key.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) {
-      throw Exception('Cannot get board size');
+      throw Exception('Cannot get render size for key');
     }
 
-    return renderBox.localToGlobal(Offset.zero) & renderBox.size;
+    final size = renderBox.size;
+    final localCorners = [
+      Offset.zero,
+      Offset(size.width, 0),
+      Offset(size.width, size.height),
+      Offset(0, size.height),
+    ];
+
+    final globalCorners =
+        localCorners.map((c) => renderBox.localToGlobal(c)).toList();
+
+    final minX = globalCorners.map((p) => p.dx).reduce(math.min);
+    final minY = globalCorners.map((p) => p.dy).reduce(math.min);
+    final maxX = globalCorners.map((p) => p.dx).reduce(math.max);
+    final maxY = globalCorners.map((p) => p.dy).reduce(math.max);
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
   }
 
   @override
@@ -149,10 +166,37 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     }
   }
 
+  Future<Uint8List> rotateBoard(Uint8List boardBytes, int quarterTurns) async {
+    final turns = quarterTurns % 4;
+    int rotateCode;
+    switch (turns) {
+      case 0:
+        return boardBytes;
+      case 1:
+        rotateCode = cv.ROTATE_90_CLOCKWISE;
+        break;
+      case 2:
+        rotateCode = cv.ROTATE_180;
+        break;
+      case 3:
+        rotateCode = cv.ROTATE_90_COUNTERCLOCKWISE;
+        break;
+      default:
+        return boardBytes;
+    }
+
+    final boardMat = cv.imdecode(boardBytes, cv.IMREAD_UNCHANGED);
+    final rotatedMat = cv.rotate(boardMat, rotateCode);
+    final (success, encoded) = cv.imencode('.jpg', rotatedMat);
+    if (!success) {
+      throw Exception('Failed to encode rotated board');
+    }
+    return encoded;
+  }
+
   // ============================================================================
   // CAPTURE FUNCTIONS
   // ============================================================================
-
   Future<void> _takePicture() async {
     if (_controller == null ||
         !_controller!.value.isInitialized ||
@@ -167,8 +211,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     try {
       final stopwatch = Stopwatch()..start();
 
-      final flutterStopwatch = Stopwatch()..start();
-      // Capture board screenshot if visible
       if (_isBoardVisible) {
         await _captureBoardScreenshot();
         Logger.log('📊 Board capture time: ${stopwatch.elapsedMilliseconds}ms');
@@ -181,87 +223,47 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('⚡ Attempting native board processing...');
 
         try {
-          // Pre-calculate board coordinates using existing Flutter logic
-          final renderBox =
-              _previewKey.currentContext?.findRenderObject() as RenderBox?;
-          if (renderBox == null) {
-            throw Exception('Cannot get preview size');
-          }
+          final stopWatch = Stopwatch()..start();
+          final quarterTurns = (_currentTurns * 4).round();
 
-          final previewSize = renderBox.size;
+          /// Sử dụng bounding rect để lấy rect đã điều chỉnh sau rotation
+          final boardBoundingRect = getBoundingRect(_boardKey);
+          final previewBoundingRect = getBoundingRect(_previewKey);
+
+          final relativeLeft =
+              boardBoundingRect.left - previewBoundingRect.left;
+          final relativeTop = boardBoundingRect.top - previewBoundingRect.top;
+          final adjustedRect = Rect.fromLTWH(
+            relativeLeft,
+            relativeTop,
+            boardBoundingRect.width,
+            boardBoundingRect.height,
+          );
+
           final pixelRatio = MediaQuery.of(context).devicePixelRatio;
           final targetResolution = resolutions[_selectedResolutionIndex];
 
-          final rectBoard = getBoardRect(_boardKey);
+          final boardBytes =
+              await rotateBoard(_boardScreenshotBytes!, quarterTurns);
 
-          final previewOrigin = renderBox.localToGlobal(Offset.zero);
-
-          final relativeBoardRect = Rect.fromLTWH(
-            rectBoard.left - previewOrigin.dx,
-            rectBoard.top - previewOrigin.dy,
-            rectBoard.width,
-            rectBoard.height,
-          );
-
-          // Send screen coordinates - native calculates after knowing actual image size
           final boardData = BoardOverlayData(
-            boardImageBytes: _boardScreenshotBytes!,
-            boardScreenX: relativeBoardRect.left,
-            boardScreenY: relativeBoardRect.top,
-            boardScreenWidth: relativeBoardRect.width,
-            boardScreenHeight: relativeBoardRect.height,
-            previewWidth: previewSize.width,
-            previewHeight: previewSize.height,
+            boardImageBytes: boardBytes,
+            boardScreenX: adjustedRect.left,
+            boardScreenY: adjustedRect.top,
+            boardScreenWidth: adjustedRect.width,
+            boardScreenHeight: adjustedRect.height,
+            previewWidth: previewBoundingRect.width,
+            previewHeight: previewBoundingRect.height,
             devicePixelRatio: pixelRatio,
             targetWidth: targetResolution.width.toInt(),
             targetHeight: targetResolution.height.toInt(),
             deviceOrientationDegrees:
                 _getOrientationDegrees(_currentOrientation),
           );
-          Logger.log(
-            '🎯 Flutter Board Data:',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Position: (${_boardPosition.dx}, ${_boardPosition.dy})',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Size: ${_boardSize.width}x${_boardSize.height}',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Board (global): ${rectBoard.left}, ${rectBoard.top}, ${rectBoard.width}, ${rectBoard.height}',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Board (preview-relative): ${relativeBoardRect.left}, ${relativeBoardRect.top}, ${relativeBoardRect.width}, ${relativeBoardRect.height}',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Centre: (${_boardPosition.dx + _boardSize.width / 2}, ${_boardPosition.dy + _boardSize.height / 2})',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Preview: ${previewSize.width}x${previewSize.height}',
-            tag: 'BoardImageProcessor',
-          );
-          Logger.log(
-            '  - Rotation turns: $_currentTurns',
-            tag: 'BoardImageProcessor',
-          );
 
-          Logger.log(
-              '📊 Flutter processing time: ${flutterStopwatch.elapsedMilliseconds}ms');
-          // Capture with native board processing
           final image = await _controller!.captureToMemory(
             boardOverlayData: boardData,
           );
-
-          Logger.log(
-              '✅ Native processing complete: ${stopwatch.elapsedMilliseconds}ms');
-
-          Logger.log('Final image size ${image.width}x${image.height}');
 
           // Save processed image
           final tempDir = await getTemporaryDirectory();
@@ -270,6 +272,9 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           await File(finalImagePath).writeAsBytes(image.bytes);
         } catch (e) {
           Logger.e('Error');
+        } finally {
+          Logger.log(
+              'Native board processing time: ${stopwatch.elapsedMilliseconds}ms');
         }
       }
 
@@ -380,6 +385,8 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         setState(() {
           _currentOrientation = newOrientation;
           _currentTurns = _getRotationTurns(newOrientation);
+          // Adjust board size on orientation change
+          _boardSize = _getSizeBoard(newOrientation);
         });
       }
     });
@@ -415,15 +422,18 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   }
 
   Size _getSizeBoard(DeviceOrientation orientation) {
+    final currentSize = _boardSize;
     switch (orientation) {
       case DeviceOrientation.portraitUp:
-        return _boardSize;
       case DeviceOrientation.portraitDown:
-        return _boardSize;
+        return currentSize.width > currentSize.height
+            ? currentSize.flipped
+            : currentSize;
       case DeviceOrientation.landscapeLeft:
-        return _boardSize.flipped;
       case DeviceOrientation.landscapeRight:
-        return _boardSize.flipped;
+        return currentSize.width < currentSize.height
+            ? currentSize.flipped
+            : currentSize;
     }
   }
 
@@ -466,356 +476,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     }
   }
 
-// Thêm hàm utility này trong class
-  cv.Mat _resizeMat(cv.Mat input, int targetWidth, int targetHeight) {
-    Logger.log(
-        '🔧 Resizing: ${input.cols}x${input.rows} → ${targetWidth}x$targetHeight');
-    // OpenCV resize uses (width, height) - CORRECTED
-    return cv.resize(input, (targetWidth, targetHeight),
-        interpolation: cv.INTER_LINEAR);
-  }
-
-  Future<String?> _mergeBoardWithCameraImage(Uint8List cameraBytes) async {
-    if (_boardScreenshotBytes == null) {
-      Logger.log('⚠️ No board screenshot captured');
-      return null;
-    }
-
-    try {
-      final mergeStopwatch = Stopwatch()..start();
-
-      // 1. Load camera image
-      Logger.log('📷 Loading camera image...');
-      final cameraMat = cv.imdecode(cameraBytes, cv.IMREAD_COLOR);
-      Logger.log('✅ Camera loaded: ${mergeStopwatch.elapsedMilliseconds}ms');
-
-      // 2. Store camera dimensions (merge at original for best quality)
-      final originalCameraWidth = cameraMat.cols;
-      final originalCameraHeight = cameraMat.rows;
-
-      Logger.log(
-          '📐 Camera size: ${originalCameraWidth}x$originalCameraHeight');
-
-      final targetResolution = resolutions[_selectedResolutionIndex];
-      final targetWidth = targetResolution.width.toInt();
-      final targetHeight = targetResolution.height.toInt();
-
-      Logger.log('🎯 Target output: ${targetWidth}x$targetHeight');
-
-      // Calculate final resize scale (applied AFTER merge)
-      final scaleWidth = targetWidth / originalCameraWidth;
-      final scaleHeight = targetHeight / originalCameraHeight;
-      final finalResizeScale = math.max(scaleWidth, scaleHeight);
-
-      Logger.log(
-          '📊 Final scale: ${finalResizeScale.toStringAsFixed(3)} (merge first, then resize)');
-
-      // Use original camera mat for merge
-      final resizedCameraMat = cameraMat;
-
-      // 3. Decode board image
-      Logger.log('🎨 Decoding board image...');
-      final boardMat = cv.imdecode(_boardScreenshotBytes!, cv.IMREAD_UNCHANGED);
-      Logger.log('✅ Board decoded: ${mergeStopwatch.elapsedMilliseconds}ms');
-
-      // 4. Get dimensions of resized camera (now working with optimized size)
-      var cameraWidth = resizedCameraMat.cols; // Width
-      var cameraHeight = resizedCameraMat.rows; // Height
-      final boardWidth = boardMat.cols; // Width
-      final boardHeight = boardMat.rows; // Height
-
-      Logger.log(
-          '📐 Camera image size (after resize): ${cameraWidth}x$cameraHeight');
-      Logger.log('📐 Board screenshot size: ${boardWidth}x$boardHeight');
-
-      // 5. CRITICAL: Handle orientation mismatch
-      // Camera sensor luôn capture ở native orientation (thường landscape)
-      // Preview và board có thể ở orientation khác (portrait)
-      final previewSize = _controller!.value.previewSize!;
-      final previewWidth = previewSize.height.toDouble();
-      final previewHeight = previewSize.width.toDouble();
-
-      Logger.log('📱 Preview size: ${previewWidth}x$previewHeight');
-
-      // Detect orientation
-      final isImageLandscape = cameraWidth > cameraHeight;
-      final isPreviewPortrait = previewHeight > previewWidth;
-      final isBoardPortrait = boardHeight > boardWidth;
-
-      Logger.log(
-          '🔍 Orientation check: Image=${isImageLandscape ? "Landscape" : "Portrait"}, Preview=${isPreviewPortrait ? "Portrait" : "Landscape"}, Board=${isBoardPortrait ? "Portrait" : "Landscape"}');
-
-      // Rotate resized camera image để match với preview và board orientation
-      cv.Mat orientedCameraMat = resizedCameraMat;
-
-      if (isImageLandscape && isPreviewPortrait) {
-        // Image is landscape but preview/board are portrait → Rotate 90° CW
-        Logger.log(
-            '🔄 ROTATING camera image 90° clockwise (landscape → portrait)...');
-
-        orientedCameraMat = cv.rotate(resizedCameraMat, cv.ROTATE_90_CLOCKWISE);
-
-        // Update dimensions after rotation
-        cameraWidth = orientedCameraMat.cols; // Width
-        cameraHeight = orientedCameraMat.rows; // Height
-
-        Logger.log(
-            '✅ Camera rotated: ${cameraWidth}x$cameraHeight (cols x rows)');
-      } else if (!isImageLandscape && !isPreviewPortrait) {
-        // Image is portrait but preview/board are landscape → Rotate 90° CCW
-        Logger.log(
-            '🔄 ROTATING camera image 90° counter-clockwise (portrait → landscape)...');
-
-        orientedCameraMat =
-            cv.rotate(resizedCameraMat, cv.ROTATE_90_COUNTERCLOCKWISE);
-
-        // Update dimensions using .cols and .rows
-        cameraWidth = orientedCameraMat.cols;
-        cameraHeight = orientedCameraMat.rows;
-
-        Logger.log(
-            '✅ Camera rotated: ${cameraWidth}x$cameraHeight (cols x rows)');
-      } else {
-        Logger.log('✅ Orientations match, no rotation needed');
-      }
-
-      Logger.log(
-          '📍 Board screen position: ${_boardPosition.dx}, ${_boardPosition.dy}');
-
-      // 6. Get device pixel ratio - board screenshot bị scale bởi pixel ratio
-      final pixelRatio = MediaQuery.of(context).devicePixelRatio;
-      Logger.log('📱 Device pixel ratio: $pixelRatio');
-
-      // 7. Calculate board widget's actual size (before pixel ratio scaling)
-      final boardWidgetWidth = boardWidth / pixelRatio;
-      final boardWidgetHeight = boardHeight / pixelRatio;
-
-      Logger.log(
-          '📐 Board widget size (logical pixels): ${boardWidgetWidth.toStringAsFixed(1)}x${boardWidgetHeight.toStringAsFixed(1)}');
-
-      // 8. Simplified coordinate mapping (no FittedBox scaling)
-      // Camera preview now renders directly, screen coords = preview coords
-      final renderBox =
-          _previewKey.currentContext?.findRenderObject() as RenderBox?;
-      if (renderBox == null) {
-        Logger.log('❌ Cannot get preview render box');
-        return null;
-      }
-
-      final previewScreenSize = renderBox.size;
-      Logger.log(
-          '📺 Preview screen size: ${previewScreenSize.width.toStringAsFixed(1)}x${previewScreenSize.height.toStringAsFixed(1)}');
-
-      // Direct scale factors: screen → camera image
-      final scaleX = cameraWidth / previewScreenSize.width;
-      final scaleY = cameraHeight / previewScreenSize.height;
-
-      Logger.log(
-          '📊 Scale factors (screen→image): X=${scaleX.toStringAsFixed(2)}, Y=${scaleY.toStringAsFixed(2)}');
-
-      // 9. Map board position: screen coords → image coords (direct mapping)
-      var imageBoardX = (_boardPosition.dx * scaleX).toInt();
-      var imageBoardY = (_boardPosition.dy * scaleY).toInt();
-
-      Logger.log('🎯 Board position on image: ($imageBoardX, $imageBoardY)');
-
-      // 10. Scale board size: screen size → image size (direct mapping)
-      var scaledBoardWidth = (boardWidgetWidth * scaleX).toInt();
-      var scaledBoardHeight = (boardWidgetHeight * scaleY).toInt();
-
-      Logger.log(
-          '📏 Board size on image: ${scaledBoardWidth}x$scaledBoardHeight');
-
-      // 11. VALIDATION: Ensure board fits within image after scaling
-      if (scaledBoardWidth > cameraWidth || scaledBoardHeight > cameraHeight) {
-        Logger.log('⚠️ Board too large after scaling, adjusting...');
-
-        // Clamp to max size
-        scaledBoardWidth =
-            math.min(scaledBoardWidth, (cameraWidth * 0.95).toInt());
-        scaledBoardHeight =
-            math.min(scaledBoardHeight, (cameraHeight * 0.95).toInt());
-
-        Logger.log(
-            '🔄 Adjusted board size: ${scaledBoardWidth}x$scaledBoardHeight');
-      }
-
-      // 12. Convert board to BGR if it has alpha channel
-      cv.Mat boardBGR = boardMat;
-      if (boardMat.channels == 4) {
-        Logger.log('🎨 Converting RGBA to BGR...');
-        boardBGR = cv.cvtColor(boardMat, cv.COLOR_RGBA2BGR);
-        Logger.log('✅ Converted: ${mergeStopwatch.elapsedMilliseconds}ms');
-      }
-
-      // 13. Resize board to image resolution scale
-      Logger.log(
-          '🔧 Resizing board to ${scaledBoardWidth}x$scaledBoardHeight...');
-
-      // Resize board screenshot từ high-DPI size xuống target size
-      cv.Mat scaledBoard =
-          _resizeMat(boardBGR, scaledBoardWidth, scaledBoardHeight);
-      Logger.log('✅ Board resized: ${mergeStopwatch.elapsedMilliseconds}ms');
-
-      // 14. CRITICAL: Verify actual dimensions after resize
-      final actualWidth = scaledBoard.cols; // Width
-      final actualHeight = scaledBoard.rows; // Height
-
-      Logger.log(
-          '🔍 Dimension verification - Expected: ${scaledBoardWidth}x$scaledBoardHeight, Actual: ${actualWidth}x$actualHeight');
-
-// Nếu vẫn bị swap, tự động điều chỉnh
-      if (actualWidth != scaledBoardWidth ||
-          actualHeight != scaledBoardHeight) {
-        Logger.log('🔄 Auto-correcting dimension mismatch...');
-
-        if (actualWidth == scaledBoardHeight &&
-            actualHeight == scaledBoardWidth) {
-          Logger.log('✅ Dimensions were swapped, using as-is');
-          // Continue with swapped dimensions - they're actually correct
-        } else {
-          Logger.log('❌ Unfixable dimension mismatch');
-          return null;
-        }
-      }
-      Logger.log('✅ Dimension and channel verification passed');
-
-      // 15. Clamp position để board không vượt bounds (use actual dimensions)
-      final finalX = imageBoardX.clamp(0, cameraWidth - actualWidth);
-      final finalY = imageBoardY.clamp(0, cameraHeight - actualHeight);
-
-      Logger.log('✅ Final position (clamped): ($finalX, $finalY)');
-
-      // 16. Final bounds validation với actual dimensions
-      Logger.log('📋 Preparing to overlay board at ($finalX, $finalY)...');
-      Logger.log(
-          '🔍 Final bounds check: board(${actualWidth}x$actualHeight) at ($finalX, $finalY) on image(${cameraWidth}x$cameraHeight)');
-
-      // Triple check bounds với actual dimensions
-      if (finalX < 0 ||
-          finalY < 0 ||
-          finalX + actualWidth > cameraWidth ||
-          finalY + actualHeight > cameraHeight) {
-        Logger.log(
-            '❌ CRITICAL: Board out of bounds! x=$finalX, y=$finalY, w=$actualWidth, h=$actualHeight, imgW=$cameraWidth, imgH=$cameraHeight');
-        Logger.log('⚠️ Returning original image to prevent crash.');
-        return null;
-      }
-
-      // 17. Safe ROI extraction với validation
-      try {
-        // OpenCV uses row-first indexing: rows = Y axis, cols = X axis
-        final roiStartRow = finalY;
-        final roiEndRow = finalY + actualHeight;
-        final roiStartCol = finalX;
-        final roiEndCol = finalX + actualWidth;
-
-        Logger.log(
-            '🎯 Extracting ROI: rows[$roiStartRow:$roiEndRow], cols[$roiStartCol:$roiEndCol]');
-        Logger.log(
-            '🔍 Mat bounds: rows=${orientedCameraMat.rows}, cols=${orientedCameraMat.cols}');
-
-        // Final safety check before rowRange/colRange
-        if (roiEndRow > orientedCameraMat.rows ||
-            roiEndCol > orientedCameraMat.cols) {
-          Logger.log(
-              '❌ CRITICAL: ROI exceeds Mat bounds! rows: $roiEndRow > ${orientedCameraMat.rows}, cols: $roiEndCol > ${orientedCameraMat.cols}');
-          Logger.log('⚠️ Returning original image to prevent crash.');
-          return null;
-        }
-
-        final cameraROI = orientedCameraMat
-            .rowRange(roiStartRow, roiEndRow)
-            .colRange(roiStartCol, roiEndCol);
-
-        Logger.log('✅ ROI extracted successfully');
-
-        // Verify ROI dimensions match board
-        final roiWidth = cameraROI.cols; // Width
-        final roiHeight = cameraROI.rows; // Height
-
-        Logger.log(
-            '🔍 ROI verification - Expected: ${actualWidth}x$actualHeight, Actual: ${roiWidth}x$roiHeight');
-
-        if (roiWidth != actualWidth || roiHeight != actualHeight) {
-          Logger.log(
-              '❌ CRITICAL: ROI dimension mismatch! Cannot proceed with copyTo.');
-          Logger.log('⚠️ Returning original image to prevent crash.');
-          return null;
-        }
-
-        // Verify channels match
-        if (cameraROI.channels != scaledBoard.channels) {
-          Logger.log(
-              '❌ CRITICAL: Channel mismatch! ROI: ${cameraROI.channels}, Board: ${scaledBoard.channels}');
-          Logger.log('⚠️ Returning original image to prevent crash.');
-          return null;
-        }
-
-        Logger.log('✅ All validations passed, performing copyTo...');
-
-        // Finally, copy board to ROI
-        scaledBoard.copyTo(cameraROI);
-
-        Logger.log(
-            '✅ Board overlay complete: ${mergeStopwatch.elapsedMilliseconds}ms');
-      } catch (e, stack) {
-        Logger.log('❌ FATAL: OpenCV overlay crashed: $e');
-        Logger.log('Stack trace: $stack');
-        Logger.log('⚠️ Returning original image without board overlay');
-        return null;
-      }
-
-      // 18. Resize final merged image to target resolution
-      cv.Mat finalMat = orientedCameraMat;
-
-      if (finalResizeScale < 1.0) {
-        // Only resize if target is smaller than original
-        final finalWidth = (orientedCameraMat.cols * finalResizeScale).toInt();
-        final finalHeight = (orientedCameraMat.rows * finalResizeScale).toInt();
-
-        Logger.log(
-            '🔧 Final resize: ${orientedCameraMat.cols}x${orientedCameraMat.rows} → ${finalWidth}x$finalHeight');
-
-        finalMat = _resizeMat(orientedCameraMat, finalWidth, finalHeight);
-        Logger.log(
-            '✅ Final resize complete: ${mergeStopwatch.elapsedMilliseconds}ms');
-        Logger.log(
-            '🔍 Actual final mat size: ${finalMat.cols}x${finalMat.rows}');
-      } else {
-        Logger.log('✅ No final resize needed (target >= original)');
-      }
-
-      // 19. Encode and save final image
-      Logger.log(
-          '💾 Encoding final image (${finalMat.cols}x${finalMat.rows})...');
-      final (success, encoded) = cv.imencode('.jpg', finalMat);
-
-      if (!success) {
-        Logger.log('❌ Failed to encode final image');
-        return null;
-      }
-
-      // Save to temp file
-      final tempDir = await getTemporaryDirectory();
-      final mergedPath =
-          '${tempDir.path}/merged_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      await File(mergedPath).writeAsBytes(encoded);
-
-      Logger.log('✅ Merged image saved: $mergedPath');
-      Logger.log('📏 Encoded image size: ${encoded.length} bytes');
-      Logger.log(
-          '📐 Final image dimensions: ${finalMat.cols}x${finalMat.rows}');
-      Logger.log(
-          '⏱️ Total merge time: ${mergeStopwatch.elapsedMilliseconds}ms');
-
-      return mergedPath;
-    } catch (e, stack) {
-      Logger.log('❌ Error merging board: $e');
-      Logger.log('Stack: $stack');
-      return null; // Return original on error
-    }
-  }
   // ============================================================================
   // UI BUILDERS
   // ============================================================================
@@ -957,18 +617,24 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
             // Board overlay
             if (_isBoardVisible)
-              BoardWidget(
-                boardKey: _boardKey,
-                screenshotController: _boardScreenshotController,
-                initialPosition: _boardPosition,
-                initialSize: _boardSize,
-                rotationTurns: _currentTurns,
-                onPositionChanged: (position) {
-                  _boardPosition = position;
-                },
-                onSizeChanged: (size) {
-                  _boardSize = size;
-                },
+              RotatedBox(
+                quarterTurns: (_currentTurns * 4).round(),
+                child: Stack(
+                  children: [
+                    BoardWidget(
+                      boardKey: _boardKey,
+                      screenshotController: _boardScreenshotController,
+                      initialPosition: _boardPosition,
+                      initialSize: _boardSize,
+                      onPositionChanged: (position) {
+                        _boardPosition = position;
+                      },
+                      onSizeChanged: (size) {
+                        _boardSize = size;
+                      },
+                    ),
+                  ],
+                ),
               ),
 
             // Zoom indicator

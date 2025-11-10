@@ -15,12 +15,6 @@ import 'package:video_player/video_player.dart';
 import 'camera_controller.dart';
 import 'camera_preview.dart';
 
-class Logger {
-  static log(Object? message) {
-    developer.log(message.toString());
-  }
-}
-
 /// Camera example home widget.
 class CameraExampleHome extends StatefulWidget {
   /// Default Constructor
@@ -1032,9 +1026,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     }
 
     try {
-      final Stopwatch stopwatch = Stopwatch()..start();
       final data = await cameraController.captureToMemory();
-      Logger.log('takePicture took ${stopwatch.elapsedMilliseconds} ms');
     } on CameraException catch (e) {
       _showCameraException(e);
       return null;

@@ -132,6 +132,8 @@ class BoardPreviewFrameProcessor implements Runnable {
       Bitmap finalBitmap = orientedBitmap;
 
       if (boardBitmap != null) {
+        Log.d(TAG, "📐 Board screenshot: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());
+
         int finalWidth = finalBitmap.getWidth();
         int finalHeight = finalBitmap.getHeight();
 
@@ -141,29 +143,63 @@ class BoardPreviewFrameProcessor implements Runnable {
 
         float scaledPreviewWidth = (float) previewLogicalWidth * scale;
         float scaledPreviewHeight = (float) previewLogicalHeight * scale;
-
         float offsetX = (scaledPreviewWidth - finalWidth) / 2f;
         float offsetY = (scaledPreviewHeight - finalHeight) / 2f;
 
-        int boardX = Math.round((float) boardScreenX * scale - offsetX);
-        int boardY = Math.round((float) boardScreenY * scale - offsetY);
-        int boardW = Math.round((float) boardScreenWidth * scale);
-        int boardH = Math.round((float) boardScreenHeight * scale);
+        int desiredBoardW = Math.round((float) boardScreenWidth * scale);
+        int desiredBoardH = Math.round((float) boardScreenHeight * scale);
+        int desiredBoardX = Math.round((float) boardScreenX * scale - offsetX);
+        int desiredBoardY = Math.round((float) boardScreenY * scale - offsetY);
 
+        Log.d(TAG, "🎯 Board (requested): pos=(" + desiredBoardX + ", " + desiredBoardY + "), size=" + desiredBoardW + "x" + desiredBoardH);
         Log.d(TAG, "📊 Scale (cover): " + scale + ", offsetX=" + offsetX + ", offsetY=" + offsetY);
-        Log.d(TAG, "🎯 Board position: pos=(" + boardX + ", " + boardY + "), size=" + boardW + "x" + boardH);
 
-        if (boardX >= 0 && boardY >= 0 &&
-            boardX + boardW <= finalBitmap.getWidth() &&
-            boardY + boardH <= finalBitmap.getHeight()) {
-          Bitmap scaledBoard = Bitmap.createScaledBitmap(boardBitmap, boardW, boardH, true);
-          Canvas canvas = new Canvas(finalBitmap);
-          canvas.drawBitmap(scaledBoard, boardX, boardY, null);
-          scaledBoard.recycle();
-          Log.d(TAG, "✅ Board merged on preview frame");
-        } else {
-          Log.w(TAG, "⚠️ Board out of bounds on preview frame, skipping overlay");
+        int clampedBoardW = Math.min(Math.max(desiredBoardW, 1), finalWidth);
+        int clampedBoardH = Math.min(Math.max(desiredBoardH, 1), finalHeight);
+        int clampedBoardX = Math.max(0, Math.min(desiredBoardX, finalWidth - clampedBoardW));
+        int clampedBoardY = Math.max(0, Math.min(desiredBoardY, finalHeight - clampedBoardH));
+
+        if (clampedBoardW != desiredBoardW
+            || clampedBoardH != desiredBoardH
+            || clampedBoardX != desiredBoardX
+            || clampedBoardY != desiredBoardY) {
+          Log.w(
+              TAG,
+              "⚠️ Board adjusted to stay in bounds: pos=("
+                  + clampedBoardX
+                  + ", "
+                  + clampedBoardY
+                  + "), size="
+                  + clampedBoardW
+                  + "x"
+                  + clampedBoardH);
         }
+
+        Bitmap boardToDraw = boardBitmap;
+        if (boardBitmap.getWidth() != clampedBoardW
+            || boardBitmap.getHeight() != clampedBoardH) {
+          boardToDraw =
+              Bitmap.createScaledBitmap(boardBitmap, clampedBoardW, clampedBoardH, true);
+          Log.d(
+              TAG,
+              "🔧 Scaled board bitmap: "
+                  + boardBitmap.getWidth()
+                  + "x"
+                  + boardBitmap.getHeight()
+                  + " → "
+                  + clampedBoardW
+                  + "x"
+                  + clampedBoardH);
+        }
+
+        Canvas canvas = new Canvas(finalBitmap);
+        canvas.drawBitmap(boardToDraw, clampedBoardX, clampedBoardY, null);
+
+        if (boardToDraw != boardBitmap) {
+          boardToDraw.recycle();
+        }
+
+        Log.d(TAG, "✅ Board merged on preview frame");
 
         boardBitmap.recycle();
       }

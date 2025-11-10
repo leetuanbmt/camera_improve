@@ -739,16 +739,20 @@ class Camera
       @NonNull Map<String, Object> boardData,
       @NonNull final Messages.Result<Messages.PlatformCapturedImageData> result) {
     if (imageStreamReader == null) {
-      Log.w(TAG, "Preview frame reader not available, falling back to still capture");
-      startStillCaptureWithBoard(boardData, result);
+      Log.w(TAG, "Preview frame reader not available");
+      result.error(
+          new Messages.FlutterError(
+              "previewUnavailable", "Preview frame reader not available", null));
       return;
     }
 
     try {
       ensurePreviewFrameSurface();
     } catch (CameraAccessException | InterruptedException e) {
-      Log.w(TAG, "Unable to enable preview frame surface, falling back", e);
-      startStillCaptureWithBoard(boardData, result);
+      Log.w(TAG, "Unable to enable preview frame surface", e);
+      result.error(
+          new Messages.FlutterError(
+              "previewSurfaceError", "Unable to enable preview frame surface", e.getMessage()));
       return;
     }
 
@@ -769,7 +773,11 @@ class Camera
             }
 
             if (previewImage == null) {
-              fallbackToStillCaptureFromBackground(boardData, result, "noPreviewFrame");
+              result.error(
+                  new Messages.FlutterError(
+                      "noPreviewFrame",
+                      "Unable to acquire preview frame (usePreviewFrame mode)",
+                      null));
               return;
             }
 
@@ -792,41 +800,28 @@ class Camera
                       }
 
                       @Override
-                      public void onError(@NonNull String errorCode, @NonNull String errorMessage) {
+                      public void onError(
+                          @NonNull String errorCode, @NonNull String errorMessage) {
                         Log.e(TAG, "Preview frame processing failed: " + errorMessage);
-                        fallbackToStillCaptureFromBackground(boardData, result, errorCode);
+                        result.error(
+                            new Messages.FlutterError(
+                                errorCode,
+                                "Preview frame processing failed",
+                                errorMessage));
                       }
                     });
 
             processor.run();
           } catch (Exception e) {
             Log.e(TAG, "Preview frame capture failed", e);
-            fallbackToStillCaptureFromBackground(boardData, result, "exception");
+            result.error(
+                new Messages.FlutterError(
+                    "previewException", "Preview frame capture failed", e.getMessage()));
           } finally {
             if (previewImage != null) {
               previewImage.close();
             }
           }
-        });
-  }
-
-  private void fallbackToStillCaptureFromBackground(
-      @NonNull Map<String, Object> boardData,
-      @NonNull Messages.Result<Messages.PlatformCapturedImageData> result,
-      @NonNull String reason) {
-    Log.w(TAG, "Falling back to still capture (" + reason + ")");
-    Handler mainHandler = new Handler(Looper.getMainLooper());
-    mainHandler.post(
-        () -> {
-          if (cameraCaptureCallback.getCameraState() != CameraState.STATE_PREVIEW) {
-            dartMessenger.error(
-                result,
-                "captureAlreadyActive",
-                "Picture is currently already being captured",
-                null);
-            return;
-          }
-          startStillCaptureWithBoard(boardData, result);
         });
   }
 
@@ -854,6 +849,7 @@ class Camera
     map.put("devicePixelRatio", data.getDevicePixelRatio());
     map.put("targetWidth", data.getTargetWidth());
     map.put("targetHeight", data.getTargetHeight());
+    map.put("deviceOrientationDegrees", data.getDeviceOrientationDegrees());
     map.put("usePreviewFrame", data.getUsePreviewFrame());
     return map;
   }

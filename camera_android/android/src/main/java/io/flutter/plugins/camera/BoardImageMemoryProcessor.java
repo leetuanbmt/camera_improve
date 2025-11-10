@@ -75,11 +75,19 @@ public class BoardImageMemoryProcessor implements Runnable {
       double devicePixelRatio = (Double) boardData.get("devicePixelRatio");
       long targetWidth = (Long) boardData.get("targetWidth");
       long targetHeight = (Long) boardData.get("targetHeight");
+      int deviceOrientationDegrees = 0;
+      Object orientationObj = boardData.get("deviceOrientationDegrees");
+      if (orientationObj instanceof Long) {
+        deviceOrientationDegrees = (int) ((Long) orientationObj).longValue();
+      } else if (orientationObj instanceof Double) {
+        deviceOrientationDegrees = (int) Math.round((Double) orientationObj);
+      }
 
       Log.d(TAG, "📐 Camera (actual): " + image.getWidth() + "x" + image.getHeight());
       Log.d(TAG, "📐 Target: " + targetWidth + "x" + targetHeight);
       Log.d(TAG, "📍 Board screen: pos=(" + boardScreenX + ", " + boardScreenY + "), size=" + boardScreenWidth + "x" + boardScreenHeight);
       Log.d(TAG, "📱 Preview: " + previewWidth + "x" + previewHeight + ", pixelRatio=" + devicePixelRatio);
+      Log.d(TAG, "📱 Device orientation: " + deviceOrientationDegrees + "°");
 
       // 3. Decode camera image (hardware accelerated)
       BitmapFactory.Options options = new BitmapFactory.Options();
@@ -171,9 +179,9 @@ public class BoardImageMemoryProcessor implements Runnable {
         orientedBitmap = croppedBitmap;
       }
 
-      // 9. Merge board (on properly oriented image - no transform needed!)
+      // 9. Merge board - ĐƠN GIẢN HÓA: Board đã được xoay trong Flutter bằng RotatedBox
       Bitmap finalBitmap = orientedBitmap;
-      
+
       if (boardBitmap != null) {
         Log.d(TAG, "📐 Board screenshot: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());
         Log.d(TAG, "📐 Board widget (logical): " + boardScreenWidth + "x" + boardScreenHeight);
@@ -181,39 +189,78 @@ public class BoardImageMemoryProcessor implements Runnable {
         int finalWidth = finalBitmap.getWidth();
         int finalHeight = finalBitmap.getHeight();
 
-        // BoxFit.cover style mapping from preview space → final image space
-        float scale = Math.max(
-            finalWidth / (float) previewWidth,
-            finalHeight / (float) previewHeight);
+        float scaleX = finalWidth / (float) previewWidth;
+        float scaleY = finalHeight / (float) previewHeight;
+        float scale = Math.max(scaleX, scaleY);
 
         float scaledPreviewWidth = (float) previewWidth * scale;
         float scaledPreviewHeight = (float) previewHeight * scale;
-
         float offsetX = (scaledPreviewWidth - finalWidth) / 2f;
         float offsetY = (scaledPreviewHeight - finalHeight) / 2f;
 
-        int boardX = Math.round((float) boardScreenX * scale - offsetX);
-        int boardY = Math.round((float) boardScreenY * scale - offsetY);
-        int boardW = Math.round((float) boardScreenWidth * scale);
-        int boardH = Math.round((float) boardScreenHeight * scale);
+        int desiredBoardW = Math.round((float) boardScreenWidth * scale);
+        int desiredBoardH = Math.round((float) boardScreenHeight * scale);
+        int desiredBoardX = Math.round((float) boardScreenX * scale - offsetX);
+        int desiredBoardY = Math.round((float) boardScreenY * scale - offsetY);
 
-        Log.d(TAG, "📊 Scale (cover): " + scale + ", offsetX=" + offsetX + ", offsetY=" + offsetY);
-        Log.d(TAG, "🎯 Board position: pos=(" + boardX + ", " + boardY + "), size=" + boardW + "x" + boardH);
- 
-        // Validate and merge
-        if (boardX >= 0 && boardY >= 0 &&
-            boardX + boardW <= finalBitmap.getWidth() &&
-            boardY + boardH <= finalBitmap.getHeight()) {
+        Log.d(
+            TAG,
+            "🎯 Board (requested): pos=("
+                + desiredBoardX
+                + ", "
+                + desiredBoardY
+                + "), size="
+                + desiredBoardW
+                + "x"
+                + desiredBoardH);
+        Log.d(TAG, "📊 Scale: " + scale + ", offsetX=" + offsetX + ", offsetY=" + offsetY);
 
-          Bitmap scaledBoard = Bitmap.createScaledBitmap(boardBitmap, boardW, boardH, true);
-          Canvas canvas = new Canvas(finalBitmap);
-          canvas.drawBitmap(scaledBoard, boardX, boardY, null);
-          scaledBoard.recycle();
-          
-          Log.d(TAG, "✅ Board merged: " + (System.currentTimeMillis() - startTime) + "ms");
-        } else {
-          Log.w(TAG, "⚠️ Board out of bounds, skipping");
+        int clampedBoardW = Math.min(Math.max(desiredBoardW, 1), finalWidth);
+        int clampedBoardH = Math.min(Math.max(desiredBoardH, 1), finalHeight);
+        int clampedBoardX = Math.max(0, Math.min(desiredBoardX, finalWidth - clampedBoardW));
+        int clampedBoardY = Math.max(0, Math.min(desiredBoardY, finalHeight - clampedBoardH));
+
+        if (clampedBoardW != desiredBoardW
+            || clampedBoardH != desiredBoardH
+            || clampedBoardX != desiredBoardX
+            || clampedBoardY != desiredBoardY) {
+          Log.w(
+              TAG,
+              "⚠️ Board adjusted to stay in bounds: pos=("
+                  + clampedBoardX
+                  + ", "
+                  + clampedBoardY
+                  + "), size="
+                  + clampedBoardW
+                  + "x"
+                  + clampedBoardH);
         }
+
+        Bitmap boardToDraw = boardBitmap;
+        if (boardBitmap.getWidth() != clampedBoardW
+            || boardBitmap.getHeight() != clampedBoardH) {
+          boardToDraw =
+              Bitmap.createScaledBitmap(boardBitmap, clampedBoardW, clampedBoardH, true);
+          Log.d(
+              TAG,
+              "🔧 Scaled board bitmap: "
+                  + boardBitmap.getWidth()
+                  + "x"
+                  + boardBitmap.getHeight()
+                  + " → "
+                  + clampedBoardW
+                  + "x"
+                  + clampedBoardH);
+        }
+
+        Canvas canvas = new Canvas(finalBitmap);
+        canvas.drawBitmap(boardToDraw, clampedBoardX, clampedBoardY, null);
+
+        if (boardToDraw != boardBitmap) {
+          boardToDraw.recycle();
+        }
+
+        Log.d(TAG, "✅ Board merged: " + (System.currentTimeMillis() - startTime) + "ms");
 
         boardBitmap.recycle();
       }
@@ -274,4 +321,3 @@ public class BoardImageMemoryProcessor implements Runnable {
     void onError(@NonNull String errorCode, @NonNull String errorMessage);
   }
 }
-

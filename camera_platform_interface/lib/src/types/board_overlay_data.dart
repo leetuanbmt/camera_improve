@@ -22,6 +22,7 @@ class BoardOverlayData {
     required this.devicePixelRatio,
     required this.targetWidth,
     required this.targetHeight,
+    required this.deviceOrientationDegrees,
     this.usePreviewFrame = false,
   });
 
@@ -47,6 +48,9 @@ class BoardOverlayData {
   final int targetWidth;
   final int targetHeight;
 
+  /// Device orientation in degrees (0, 90, 180, 270)
+  final int deviceOrientationDegrees;
+
   /// Whether to capture using the preview frame instead of full-resolution JPEG.
   final bool usePreviewFrame;
 
@@ -63,6 +67,7 @@ class BoardOverlayData {
       'devicePixelRatio': devicePixelRatio,
       'targetWidth': targetWidth,
       'targetHeight': targetHeight,
+      'deviceOrientationDegrees': deviceOrientationDegrees,
       'usePreviewFrame': usePreviewFrame,
     };
   }
@@ -88,6 +93,7 @@ class BoardOverlayData {
             devicePixelRatio == other.devicePixelRatio &&
             targetWidth == other.targetWidth &&
             targetHeight == other.targetHeight &&
+            deviceOrientationDegrees == other.deviceOrientationDegrees &&
             usePreviewFrame == other.usePreviewFrame;
   }
 
@@ -104,6 +110,7 @@ class BoardOverlayData {
       devicePixelRatio,
       targetWidth,
       targetHeight,
+      deviceOrientationDegrees,
       usePreviewFrame,
     );
   }

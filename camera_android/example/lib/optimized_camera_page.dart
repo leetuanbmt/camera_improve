@@ -4,7 +4,6 @@
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:camera_example/camera_controller.dart';
 import 'package:camera_platform_interface/camera_platform_interface.dart';
@@ -77,10 +76,19 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
   // Preview rendering key để lấy actual screen size
   final GlobalKey _previewKey = GlobalKey();
 
+  final GlobalKey _boardKey = GlobalKey();
+  Rect getBoardRect(GlobalKey boardKey) {
+    final renderBox = boardKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) {
+      throw Exception('Cannot get board size');
+    }
+
+    return renderBox.localToGlobal(Offset.zero) & renderBox.size;
+  }
+
   @override
   void initState() {
     super.initState();
-    // Lock device orientation to portrait (screen không xoay)
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
@@ -92,13 +100,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
   @override
   void dispose() {
-    // Restore all orientations
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
     _accelerometerSubscription?.cancel();
     _controller?.dispose();
     super.dispose();
@@ -191,19 +192,65 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
           final pixelRatio = MediaQuery.of(context).devicePixelRatio;
           final targetResolution = resolutions[_selectedResolutionIndex];
 
+          final rectBoard = getBoardRect(_boardKey);
+
+          final previewOrigin = renderBox.localToGlobal(Offset.zero);
+
+          final relativeBoardRect = Rect.fromLTWH(
+            rectBoard.left - previewOrigin.dx,
+            rectBoard.top - previewOrigin.dy,
+            rectBoard.width,
+            rectBoard.height,
+          );
+
           // Send screen coordinates - native calculates after knowing actual image size
           final boardData = BoardOverlayData(
             boardImageBytes: _boardScreenshotBytes!,
-            boardScreenX: _boardPosition.dx,
-            boardScreenY: _boardPosition.dy,
-            boardScreenWidth: _boardSize.width,
-            boardScreenHeight: _boardSize.height,
+            boardScreenX: relativeBoardRect.left,
+            boardScreenY: relativeBoardRect.top,
+            boardScreenWidth: relativeBoardRect.width,
+            boardScreenHeight: relativeBoardRect.height,
             previewWidth: previewSize.width,
             previewHeight: previewSize.height,
             devicePixelRatio: pixelRatio,
             targetWidth: targetResolution.width.toInt(),
             targetHeight: targetResolution.height.toInt(),
+            deviceOrientationDegrees:
+                _getOrientationDegrees(_currentOrientation),
           );
+          Logger.log(
+            '🎯 Flutter Board Data:',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Position: (${_boardPosition.dx}, ${_boardPosition.dy})',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Size: ${_boardSize.width}x${_boardSize.height}',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Board (global): ${rectBoard.left}, ${rectBoard.top}, ${rectBoard.width}, ${rectBoard.height}',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Board (preview-relative): ${relativeBoardRect.left}, ${relativeBoardRect.top}, ${relativeBoardRect.width}, ${relativeBoardRect.height}',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Centre: (${_boardPosition.dx + _boardSize.width / 2}, ${_boardPosition.dy + _boardSize.height / 2})',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Preview: ${previewSize.width}x${previewSize.height}',
+            tag: 'BoardImageProcessor',
+          );
+          Logger.log(
+            '  - Rotation turns: $_currentTurns',
+            tag: 'BoardImageProcessor',
+          );
+
           Logger.log(
               '📊 Flutter processing time: ${flutterStopwatch.elapsedMilliseconds}ms');
           // Capture with native board processing
@@ -364,6 +411,33 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         return 0.5;
       case DeviceOrientation.landscapeRight:
         return -0.25;
+    }
+  }
+
+  Size _getSizeBoard(DeviceOrientation orientation) {
+    switch (orientation) {
+      case DeviceOrientation.portraitUp:
+        return _boardSize;
+      case DeviceOrientation.portraitDown:
+        return _boardSize;
+      case DeviceOrientation.landscapeLeft:
+        return _boardSize.flipped;
+      case DeviceOrientation.landscapeRight:
+        return _boardSize.flipped;
+    }
+  }
+
+  int _getOrientationDegrees(DeviceOrientation orientation) {
+    Logger.log('Orientation: $orientation');
+    switch (orientation) {
+      case DeviceOrientation.portraitUp:
+        return 0;
+      case DeviceOrientation.landscapeLeft:
+        return 90;
+      case DeviceOrientation.portraitDown:
+        return 180;
+      case DeviceOrientation.landscapeRight:
+        return 270;
     }
   }
 
@@ -884,6 +958,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
             // Board overlay
             if (_isBoardVisible)
               BoardWidget(
+                boardKey: _boardKey,
                 screenshotController: _boardScreenshotController,
                 initialPosition: _boardPosition,
                 initialSize: _boardSize,

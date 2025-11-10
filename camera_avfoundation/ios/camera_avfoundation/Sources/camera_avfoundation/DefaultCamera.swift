@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import CoreMotion
+import UIKit
 
 // Import Objectice-C part of the implementation when SwiftPM is used.
 #if canImport(camera_avfoundation_objc)
@@ -457,5 +458,94 @@ final class DefaultCamera: FLTCam, Camera {
     (self as FLTCam).captureToMemory(completion: { data, width, height, error in
       completion(data, Int(width), Int(height), error)
     })
+  }
+
+  func captureToMemoryWithBoard(
+    _ boardData: FCPPlatformBoardOverlayData,
+    completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
+  ) {
+    captureToMemory { data, width, height, error in
+      if let error = error {
+        completion(nil, width, height, error)
+        return
+      }
+
+      guard
+        let baseData = data,
+        let baseImage = UIImage(data: baseData)?.fixedOrientation(),
+        let boardImage = UIImage(data: boardData.boardImageBytes.data)?.fixedOrientation()
+      else {
+        completion(data, width, height, nil)
+        return
+      }
+
+      guard
+        let composed = DefaultCamera.composeBoard(
+          baseImage: baseImage,
+          boardImage: boardImage,
+          boardData: boardData
+        )
+      else {
+        completion(baseData, width, height, nil)
+        return
+      }
+
+      completion(composed, width, height, nil)
+    }
+  }
+
+  private static func composeBoard(
+    baseImage: UIImage,
+    boardImage: UIImage,
+    boardData: FCPPlatformBoardOverlayData
+  ) -> Data? {
+    let basePixelSize = CGSize(
+      width: baseImage.size.width * baseImage.scale,
+      height: baseImage.size.height * baseImage.scale
+    )
+
+    guard basePixelSize.width > 0, basePixelSize.height > 0 else { return nil }
+
+    let previewWidth = CGFloat(boardData.previewWidth)
+    let previewHeight = CGFloat(boardData.previewHeight)
+
+    let scale = max(basePixelSize.width / previewWidth, basePixelSize.height / previewHeight)
+    let scaledPreviewWidth = previewWidth * scale
+    let scaledPreviewHeight = previewHeight * scale
+    let offsetX = (scaledPreviewWidth - basePixelSize.width) / 2.0
+    let offsetY = (scaledPreviewHeight - basePixelSize.height) / 2.0
+
+    var boardRect = CGRect(
+      x: CGFloat(boardData.boardScreenX) * scale - offsetX,
+      y: CGFloat(boardData.boardScreenY) * scale - offsetY,
+      width: CGFloat(boardData.boardScreenWidth) * scale,
+      height: CGFloat(boardData.boardScreenHeight) * scale
+    )
+
+    let bounds = CGRect(origin: .zero, size: basePixelSize)
+    boardRect = boardRect.intersection(bounds)
+
+    guard !boardRect.isNull, boardRect.width > 0, boardRect.height > 0 else {
+      return baseImage.jpegData(compressionQuality: 0.9)
+    }
+
+    UIGraphicsBeginImageContextWithOptions(basePixelSize, false, 1.0)
+    baseImage.draw(in: CGRect(origin: .zero, size: basePixelSize))
+    boardImage.draw(in: boardRect)
+    let composed = UIGraphicsGetImageFromCurrentImageContext()
+    UIGraphicsEndImageContext()
+
+    return composed?.jpegData(compressionQuality: 0.9)
+  }
+}
+
+private extension UIImage {
+  func fixedOrientation() -> UIImage {
+    if imageOrientation == .up { return self }
+    UIGraphicsBeginImageContextWithOptions(size, false, scale)
+    draw(in: CGRect(origin: .zero, size: size))
+    let normalized = UIGraphicsGetImageFromCurrentImageContext()
+    UIGraphicsEndImageContext()
+    return normalized ?? self
   }
 }

@@ -45,3 +45,5 @@ opencv_temp/
 opencv_cache/
 
 **build/**
+*.DS_Store
+.DS_Store

@@ -894,6 +894,19 @@ public class Messages {
       this.targetHeight = setterArg;
     }
 
+    private @NonNull Long deviceOrientationDegrees;
+
+    public @NonNull Long getDeviceOrientationDegrees() {
+      return deviceOrientationDegrees;
+    }
+
+    public void setDeviceOrientationDegrees(@NonNull Long setterArg) {
+      if (setterArg == null) {
+        throw new IllegalStateException("Nonnull field \"deviceOrientationDegrees\" is null.");
+      }
+      this.deviceOrientationDegrees = setterArg;
+    }
+
     private @NonNull Boolean usePreviewFrame;
 
     public @NonNull Boolean getUsePreviewFrame() {
@@ -908,42 +921,19 @@ public class Messages {
     }
 
     /** Constructor is non-public to enforce null safety; use Builder. */
-    PlatformBoardOverlayData() {
-      this.usePreviewFrame = false;
-    }
+    PlatformBoardOverlayData() {}
 
     @Override
     public boolean equals(Object o) {
       if (this == o) { return true; }
       if (o == null || getClass() != o.getClass()) { return false; }
       PlatformBoardOverlayData that = (PlatformBoardOverlayData) o;
-      return Arrays.equals(boardImageBytes, that.boardImageBytes)
-          && boardScreenX.equals(that.boardScreenX)
-          && boardScreenY.equals(that.boardScreenY)
-          && boardScreenWidth.equals(that.boardScreenWidth)
-          && boardScreenHeight.equals(that.boardScreenHeight)
-          && previewWidth.equals(that.previewWidth)
-          && previewHeight.equals(that.previewHeight)
-          && devicePixelRatio.equals(that.devicePixelRatio)
-          && targetWidth.equals(that.targetWidth)
-          && targetHeight.equals(that.targetHeight)
-          && usePreviewFrame.equals(that.usePreviewFrame);
+      return Arrays.equals(boardImageBytes, that.boardImageBytes) && boardScreenX.equals(that.boardScreenX) && boardScreenY.equals(that.boardScreenY) && boardScreenWidth.equals(that.boardScreenWidth) && boardScreenHeight.equals(that.boardScreenHeight) && previewWidth.equals(that.previewWidth) && previewHeight.equals(that.previewHeight) && devicePixelRatio.equals(that.devicePixelRatio) && targetWidth.equals(that.targetWidth) && targetHeight.equals(that.targetHeight) && deviceOrientationDegrees.equals(that.deviceOrientationDegrees) && usePreviewFrame.equals(that.usePreviewFrame);
     }
 
     @Override
     public int hashCode() {
-      int pigeonVar_result =
-          Objects.hash(
-              boardScreenX,
-              boardScreenY,
-              boardScreenWidth,
-              boardScreenHeight,
-              previewWidth,
-              previewHeight,
-              devicePixelRatio,
-              targetWidth,
-              targetHeight,
-              usePreviewFrame);
+      int pigeonVar_result = Objects.hash(boardScreenX, boardScreenY, boardScreenWidth, boardScreenHeight, previewWidth, previewHeight, devicePixelRatio, targetWidth, targetHeight, deviceOrientationDegrees, usePreviewFrame);
       pigeonVar_result = 31 * pigeonVar_result + Arrays.hashCode(boardImageBytes);
       return pigeonVar_result;
     }
@@ -1030,6 +1020,14 @@ public class Messages {
         return this;
       }
 
+      private @Nullable Long deviceOrientationDegrees;
+
+      @CanIgnoreReturnValue
+      public @NonNull Builder setDeviceOrientationDegrees(@NonNull Long setterArg) {
+        this.deviceOrientationDegrees = setterArg;
+        return this;
+      }
+
       private @Nullable Boolean usePreviewFrame;
 
       @CanIgnoreReturnValue
@@ -1050,15 +1048,15 @@ public class Messages {
         pigeonReturn.setDevicePixelRatio(devicePixelRatio);
         pigeonReturn.setTargetWidth(targetWidth);
         pigeonReturn.setTargetHeight(targetHeight);
-        pigeonReturn.setUsePreviewFrame(
-            usePreviewFrame == null ? false : usePreviewFrame);
+        pigeonReturn.setDeviceOrientationDegrees(deviceOrientationDegrees);
+        pigeonReturn.setUsePreviewFrame(usePreviewFrame);
         return pigeonReturn;
       }
     }
 
     @NonNull
     ArrayList<Object> toList() {
-      ArrayList<Object> toListResult = new ArrayList<>(11);
+      ArrayList<Object> toListResult = new ArrayList<>(12);
       toListResult.add(boardImageBytes);
       toListResult.add(boardScreenX);
       toListResult.add(boardScreenY);
@@ -1069,6 +1067,7 @@ public class Messages {
       toListResult.add(devicePixelRatio);
       toListResult.add(targetWidth);
       toListResult.add(targetHeight);
+      toListResult.add(deviceOrientationDegrees);
       toListResult.add(usePreviewFrame);
       return toListResult;
     }
@@ -1095,13 +1094,10 @@ public class Messages {
       pigeonResult.setTargetWidth((Long) targetWidth);
       Object targetHeight = pigeonVar_list.get(9);
       pigeonResult.setTargetHeight((Long) targetHeight);
-      if (pigeonVar_list.size() > 10) {
-        Object usePreviewFrame = pigeonVar_list.get(10);
-        pigeonResult.setUsePreviewFrame(
-            usePreviewFrame == null ? false : (Boolean) usePreviewFrame);
-      } else {
-        pigeonResult.setUsePreviewFrame(false);
-      }
+      Object deviceOrientationDegrees = pigeonVar_list.get(10);
+      pigeonResult.setDeviceOrientationDegrees((Long) deviceOrientationDegrees);
+      Object usePreviewFrame = pigeonVar_list.get(11);
+      pigeonResult.setUsePreviewFrame((Boolean) usePreviewFrame);
       return pigeonResult;
     }
   }

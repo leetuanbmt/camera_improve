@@ -16,6 +16,7 @@ class BoardWidget extends StatefulWidget {
   const BoardWidget({
     super.key,
     required this.screenshotController,
+    required this.boardKey,
     this.onPositionChanged,
     this.onSizeChanged,
     this.initialPosition,
@@ -31,7 +32,7 @@ class BoardWidget extends StatefulWidget {
   final Size? initialSize;
   final double opacity;
   final double rotationTurns;
-
+  final GlobalKey boardKey;
   @override
   State<BoardWidget> createState() => _BoardWidgetState();
 }
@@ -60,6 +61,7 @@ class _BoardWidgetState extends State<BoardWidget> {
         left: _position.dx,
         top: _position.dy,
         child: Screenshot(
+          key: widget.boardKey,
           controller: widget.screenshotController,
           child: GestureDetector(
             onPanUpdate: (details) {

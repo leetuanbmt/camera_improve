@@ -214,6 +214,7 @@ class AndroidCamera extends CameraPlatform {
           devicePixelRatio: boardOverlayData.devicePixelRatio,
           targetWidth: boardOverlayData.targetWidth,
           targetHeight: boardOverlayData.targetHeight,
+          deviceOrientationDegrees: boardOverlayData.deviceOrientationDegrees,
           usePreviewFrame: boardOverlayData.usePreviewFrame,
         );
 

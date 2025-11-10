@@ -15,6 +15,11 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
+
+// Thêm import
+import com.drew.metadata.Metadata;
+import com.drew.metadata.exif.ExifIFD0Directory;
+
 /**
  * Processes a JPEG {@link Image} with board overlay in memory.
  * 
@@ -283,6 +288,38 @@ public class BoardImageMemoryProcessor implements Runnable {
         Log.e(TAG, "❌ JPEG compression failed");
         callback.onError("compressError", "Failed to compress final image");
         return;
+      }
+
+      byte[] jpegBytes = outputStream.toByteArray();
+
+      // GHI EXIF ORIENTATION
+      int exifOrientation = 1; // Default: top-left
+      if (needsRotation) {
+          // Camera landscape + preview portrait → đã xoay 90° CW
+          // → EXIF: bottom-right = 3, nhưng vì đã xoay vật lý → cần ghi là top-left (1)
+          // Không! Vì đã xoay vật lý → ảnh đang đúng → ghi orientation = 1
+          exifOrientation = 1;
+      } else {
+          // Không xoay → giữ nguyên orientation gốc (nếu có)
+          // Nhưng vì native decode mất EXIF → mặc định 1
+          exifOrientation = 1;
+      }
+
+
+      try {
+          Metadata metadata = new Metadata();
+          ExifIFD0Directory exifDir = new ExifIFD0Directory();
+          exifDir.setInt(ExifIFD0Directory.TAG_ORIENTATION, exifOrientation);
+          metadata.addDirectory(exifDir);
+
+          // Ghi metadata vào JPEG
+          byte[] finalBytes = JpegMetadataWriter.writeMetadata(jpegBytes, metadata);
+          resultBytes = finalBytes;
+
+          Log.d(TAG, "EXIF orientation set to: " + exifOrientation);
+      } catch (Exception e) {
+          Log.w(TAG, "Failed to write EXIF, using raw JPEG", e);
+          resultBytes = jpegBytes; // Fallback
       }
 
       Log.d(TAG, "✅ Encode complete: " + (System.currentTimeMillis() - startTime) + "ms");

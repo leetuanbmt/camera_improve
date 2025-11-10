@@ -166,6 +166,54 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     }
   }
 
+  BoardOverlayData? boardOverlayData;
+
+  Size get targetResolution => resolutions[_selectedResolutionIndex];
+
+  Future<void> _captureBoardScreenshot() async {
+    if (!_isBoardVisible) {
+      Logger.log('⚠️ Board not visible, skipping capture');
+      return;
+    }
+    try {
+      final image =
+          await _boardScreenshotController.capture(delay: Duration.zero);
+      _boardScreenshotBytes = image;
+
+      /// Sử dụng bounding rect để lấy rect đã điều chỉnh sau rotation
+      final boardBoundingRect = getBoundingRect(_boardKey);
+      final previewBoundingRect = getBoundingRect(_previewKey);
+
+      final relativeLeft = boardBoundingRect.left - previewBoundingRect.left;
+      final relativeTop = boardBoundingRect.top - previewBoundingRect.top;
+      final adjustedRect = Rect.fromLTWH(
+        relativeLeft,
+        relativeTop,
+        boardBoundingRect.width,
+        boardBoundingRect.height,
+      );
+
+      final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+
+      boardOverlayData = BoardOverlayData(
+        boardImageBytes: _boardScreenshotBytes!,
+        boardScreenX: adjustedRect.left,
+        boardScreenY: adjustedRect.top,
+        boardScreenWidth: adjustedRect.width,
+        boardScreenHeight: adjustedRect.height,
+        previewWidth: previewBoundingRect.width,
+        previewHeight: previewBoundingRect.height,
+        devicePixelRatio: pixelRatio,
+        targetWidth: targetResolution.width.toInt(),
+        targetHeight: targetResolution.height.toInt(),
+        deviceOrientationDegrees: _getOrientationDegrees(_currentOrientation),
+      );
+    } catch (e, stack) {
+      Logger.log('❌ Error capturing board: $e');
+      Logger.log('Stack trace: $stack');
+    }
+  }
+
   // ============================================================================
   // CAPTURE FUNCTIONS
   // ============================================================================
@@ -188,70 +236,33 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         Logger.log('📊 Board capture time: ${stopwatch.elapsedMilliseconds}ms');
       }
 
-      // Try native processing first (if board visible)
-      if (_isBoardVisible && _boardScreenshotBytes != null) {
-        Logger.log('⚡ Attempting native board processing...');
+      try {
+        final image = await _controller!.captureToMemory(
+          targetWidth: targetResolution.width.toInt(),
+          targetHeight: targetResolution.height.toInt(),
+          boardOverlayData: boardOverlayData,
+        );
 
-        try {
-          /// Sử dụng bounding rect để lấy rect đã điều chỉnh sau rotation
-          final boardBoundingRect = getBoundingRect(_boardKey);
-          final previewBoundingRect = getBoundingRect(_previewKey);
-
-          final relativeLeft =
-              boardBoundingRect.left - previewBoundingRect.left;
-          final relativeTop = boardBoundingRect.top - previewBoundingRect.top;
-          final adjustedRect = Rect.fromLTWH(
-            relativeLeft,
-            relativeTop,
-            boardBoundingRect.width,
-            boardBoundingRect.height,
-          );
-
-          final pixelRatio = MediaQuery.of(context).devicePixelRatio;
-          final targetResolution = resolutions[_selectedResolutionIndex];
-
-          final boardData = BoardOverlayData(
-            boardImageBytes: _boardScreenshotBytes!,
-            boardScreenX: adjustedRect.left,
-            boardScreenY: adjustedRect.top,
-            boardScreenWidth: adjustedRect.width,
-            boardScreenHeight: adjustedRect.height,
-            previewWidth: previewBoundingRect.width,
-            previewHeight: previewBoundingRect.height,
-            devicePixelRatio: pixelRatio,
-            targetWidth: targetResolution.width.toInt(),
-            targetHeight: targetResolution.height.toInt(),
-            deviceOrientationDegrees:
-                _getOrientationDegrees(_currentOrientation),
-          );
-
-          final image = await _controller!.captureToMemory(
-            targetWidth: targetResolution.width.toInt(),
-            targetHeight: targetResolution.height.toInt(),
-            boardOverlayData: boardData,
-          );
-
-          // Save processed image
-          final tempDir = await getTemporaryDirectory();
-          final finalImagePath =
-              '${tempDir.path}/native_${DateTime.now().millisecondsSinceEpoch}.jpg';
-          await File(finalImagePath).writeAsBytes(image.bytes, flush: true);
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => PdfPreview(imagePath: finalImagePath),
-            ),
-          );
-          setState(() {
-            _capturedImage = XFile(finalImagePath);
-            _isProcessing = false;
-          });
-        } catch (e) {
-          Logger.e('Error');
-        } finally {
-          Logger.log(
-              'Native board processing time: ${stopwatch.elapsedMilliseconds} ms');
-        }
+        // Save processed image
+        final tempDir = await getTemporaryDirectory();
+        final finalImagePath =
+            '${tempDir.path}/native_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        await File(finalImagePath).writeAsBytes(image.bytes, flush: true);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PdfPreview(imagePath: finalImagePath),
+          ),
+        );
+        setState(() {
+          _capturedImage = XFile(finalImagePath);
+          _isProcessing = false;
+        });
+      } catch (e) {
+        Logger.e('Error');
+      } finally {
+        Logger.log(
+            'Native board processing time: ${stopwatch.elapsedMilliseconds} ms');
       }
 
       // if (finalImagePath == null) {
@@ -430,21 +441,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     setState(() {
       _isBoardVisible = !_isBoardVisible;
     });
-  }
-
-  Future<void> _captureBoardScreenshot() async {
-    if (!_isBoardVisible) {
-      Logger.log('⚠️ Board not visible, skipping capture');
-      return;
-    }
-    try {
-      final image =
-          await _boardScreenshotController.capture(delay: Duration.zero);
-      _boardScreenshotBytes = image;
-    } catch (e, stack) {
-      Logger.log('❌ Error capturing board: $e');
-      Logger.log('Stack trace: $stack');
-    }
   }
 
   // ============================================================================

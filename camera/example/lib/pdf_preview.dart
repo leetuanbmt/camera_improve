@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf_combiner/models/image_scale.dart';
 import 'package:pdf_combiner/models/pdf_from_multiple_image_config.dart';
@@ -26,9 +27,23 @@ class _PdfPreviewState extends State<PdfPreview> {
   @override
   void initState() {
     super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     pdfController = PdfController(
       document: _createPdfFromImage(),
     );
+  }
+
+  @override
+  void dispose() {
+    pdfController.dispose();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    super.dispose();
   }
 
   Future<PdfDocument> _createPdfFromImage() async {
@@ -44,7 +59,9 @@ class _PdfPreviewState extends State<PdfPreview> {
         outputPath: pdfPath,
         config: PdfFromMultipleImageConfig(
           rescale: ImageScale(
-              width: widget.width.toInt(), height: widget.height.toInt()),
+            width: widget.width.toInt(),
+            height: widget.height.toInt(),
+          ),
         ),
       );
 

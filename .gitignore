@@ -16,6 +16,10 @@ ios/Pods/
 macos/Pods/
 *.iml
 
+# Gradle
+.gradle/
+*/.gradle/
+
 # VS Code
 .vscode/
 
@@ -47,3 +51,5 @@ opencv_cache/
 **build/**
 *.DS_Store
 .DS_Store
+
+*.gradle**

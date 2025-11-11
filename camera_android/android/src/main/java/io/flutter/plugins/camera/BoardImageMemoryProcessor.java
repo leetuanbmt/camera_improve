@@ -292,19 +292,22 @@ public class BoardImageMemoryProcessor implements Runnable {
 
       byte[] jpegBytes = outputStream.toByteArray();
 
-      // GHI EXIF ORIENTATION
-      int exifOrientation = 1; // Default: top-left
+      // Set EXIF orientation based on device orientation for PDF compatibility
+      // Android camera outputs portrait images, but when device is landscape,
+      // we rotated the image 90° CW, so we need EXIF to tell PDF to rotate back
+      int exifOrientation = 1; // Default: top-left (normal)
+      
       if (needsRotation) {
-          // Camera landscape + preview portrait → đã xoay 90° CW
-          // → EXIF: bottom-right = 3, nhưng vì đã xoay vật lý → cần ghi là top-left (1)
-          // Không! Vì đã xoay vật lý → ảnh đang đúng → ghi orientation = 1
-          exifOrientation = 1;
+          // Image was rotated 90° CW (landscape → portrait)
+          // PDF reader should rotate -90° (=270° CW) to view correctly
+          // EXIF 8 = rotate 270° CW = rotate -90°
+          exifOrientation = 8;
+          Log.d(TAG, "📐 Setting EXIF 8 (rotate 270° CW) because image was rotated 90° CW");
       } else {
-          // Không xoay → giữ nguyên orientation gốc (nếu có)
-          // Nhưng vì native decode mất EXIF → mặc định 1
+          // No rotation applied, image is normal portrait
           exifOrientation = 1;
+          Log.d(TAG, "📐 Setting EXIF 1 (normal) - no rotation");
       }
-
 
       try {
           Metadata metadata = new Metadata();
@@ -316,7 +319,7 @@ public class BoardImageMemoryProcessor implements Runnable {
           byte[] finalBytes = JpegMetadataWriter.writeMetadata(jpegBytes, metadata);
           resultBytes = finalBytes;
 
-          Log.d(TAG, "EXIF orientation set to: " + exifOrientation);
+          Log.d(TAG, "✅ EXIF orientation set to: " + exifOrientation);
       } catch (Exception e) {
           Log.w(TAG, "Failed to write EXIF, using raw JPEG", e);
           resultBytes = jpegBytes; // Fallback

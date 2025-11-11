@@ -8,14 +8,10 @@ environment:
 
 dependencies:
   camera:
-    # When depending on this package from a real application you should use:
-    #   camera: ^x.y.z
-    # See https://dart.dev/tools/pub/dependencies#version-constraints
-    # The example app is bundled with the plugin so we use a path dependency on
-    # the parent directory to use the current plugin's version.
     path: ../
   flutter:
     sdk: flutter
+  image: ^4.5.4
   path_provider: ^2.0.0
   pdf_combiner: ^4.4.0
   pdfx: ^2.9.2

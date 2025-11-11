@@ -16,6 +16,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 
 import 'board_widget.dart';
 import 'camera_preview.dart';
+import 'image_utils.dart';
 import 'logger.dart';
 
 /// Optimized Camera Page theo CAMERA_UI_ANALYSIS.md
@@ -78,31 +79,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
   final GlobalKey _boardKey = GlobalKey();
 
-  Rect getBoundingRect(GlobalKey key) {
-    final renderBox = key.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) {
-      throw Exception('Cannot get render size for key');
-    }
-
-    final size = renderBox.size;
-    final localCorners = [
-      Offset.zero,
-      Offset(size.width, 0),
-      Offset(size.width, size.height),
-      Offset(0, size.height),
-    ];
-
-    final globalCorners =
-        localCorners.map((c) => renderBox.localToGlobal(c)).toList();
-
-    final minX = globalCorners.map((p) => p.dx).reduce(math.min);
-    final minY = globalCorners.map((p) => p.dy).reduce(math.min);
-    final maxX = globalCorners.map((p) => p.dx).reduce(math.max);
-    final maxY = globalCorners.map((p) => p.dy).reduce(math.max);
-
-    return Rect.fromLTRB(minX, minY, maxX, maxY);
-  }
-
   @override
   void initState() {
     super.initState();
@@ -139,7 +115,6 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
       camera,
       mediaSettings: MediaSettings(
         resolutionPreset: _currentResolution,
-        enableAudio: false,
       ),
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -176,13 +151,22 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
   Future<void> _captureBoardScreenshot() async {
     if (!_isBoardVisible) {
+      boardOverlayData = null;
       Logger.log('⚠️ Board not visible, skipping capture');
       return;
     }
     try {
-      final image =
-          await _boardScreenshotController.capture(delay: Duration.zero);
+      final timedResult = await measureExecutionTime(() {
+        return _boardScreenshotController.capture(delay: Duration.zero);
+      });
+      final image = timedResult.result;
+      Logger.log('📊 Board capture time: ${timedResult.milliseconds}ms');
       _boardScreenshotBytes = image;
+      final (width, height) = getSizeWithImage(image!);
+      Logger.log(
+        '📷 Board screenshot size: $width x $height',
+        tag: 'captureToMemory',
+      );
 
       /// Sử dụng bounding rect để lấy rect đã điều chỉnh sau rotation
       final boardBoundingRect = getBoundingRect(_boardKey);
@@ -212,6 +196,8 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         targetHeight: targetResolution.height.toInt(),
         deviceOrientationDegrees: _getOrientationDegrees(_currentOrientation),
       );
+      Logger.log(
+          '📦 BoardOverlayData -> screen=(${boardOverlayData!.boardScreenX.toStringAsFixed(2)}, ${boardOverlayData!.boardScreenY.toStringAsFixed(2)}) size=${boardOverlayData!.boardScreenWidth.toStringAsFixed(2)}x${boardOverlayData!.boardScreenHeight.toStringAsFixed(2)} preview=${boardOverlayData!.previewWidth.toStringAsFixed(2)}x${boardOverlayData!.previewHeight.toStringAsFixed(2)} dpr=${boardOverlayData!.devicePixelRatio.toStringAsFixed(2)} orientation=${boardOverlayData!.deviceOrientationDegrees} target=${boardOverlayData!.targetWidth}x${boardOverlayData!.targetHeight}');
     } catch (e, stack) {
       Logger.log('❌ Error capturing board: $e');
       Logger.log('Stack trace: $stack');
@@ -234,24 +220,26 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
 
     try {
       final stopwatch = Stopwatch()..start();
-
-      if (_isBoardVisible) {
-        await _captureBoardScreenshot();
-        Logger.log('📊 Board capture time: ${stopwatch.elapsedMilliseconds}ms');
-      }
+      await _captureBoardScreenshot();
+      Logger.log('📊 Board capture time: ${stopwatch.elapsedMilliseconds}ms');
 
       try {
-        final image = await _controller!.captureToMemory(
-          targetWidth: targetResolution.width.toInt(),
-          targetHeight: targetResolution.height.toInt(),
-          boardOverlayData: boardOverlayData,
-        );
-
+        final result = await measureExecutionTime(() {
+          return _controller!.captureToMemory(
+            targetWidth: targetResolution.width.toInt(),
+            targetHeight: targetResolution.height.toInt(),
+            boardOverlayData: boardOverlayData,
+          );
+        });
+        Logger.log('📊 Native board processing time: ${result.milliseconds}ms');
+        if (boardOverlayData != null) {
+          Logger.log(
+              '📤 Sending board overlay to native: ${boardOverlayData.toString()}');
+        } else {
+          Logger.log('📤 No board overlay data sent to native');
+        }
         // Save processed image
-        final tempDir = await getTemporaryDirectory();
-        final finalImagePath =
-            '${tempDir.path}/native_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        await File(finalImagePath).writeAsBytes(image.bytes, flush: true);
+        final String finalImagePath = await saveImage(result.result.bytes);
         // Navigator.push(
         //   context,
         //   MaterialPageRoute(
@@ -264,20 +252,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         });
       } catch (e) {
         Logger.e('Error');
-      } finally {
-        Logger.log(
-            'Native board processing time: ${stopwatch.elapsedMilliseconds} ms');
       }
-
-      // if (finalImagePath == null) {
-      //   setState(() {
-      //     _isProcessing = false;
-      //   });
-      //   return;
-      // }
-
-      // // finalImagePath is non-null after check
-      // final String imagePath = finalImagePath;
     } catch (e) {
       Logger.log('Error capturing image: $e');
       setState(() {

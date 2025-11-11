@@ -461,13 +461,15 @@ final class DefaultCamera: FLTCam, Camera {
         return
       }
       guard let baseData = data,
-            let baseImage = UIImage(data: baseData) else {
+            let rawImage = UIImage(data: baseData) else {
         completion(data, Int(width), Int(height), nil)
         return
       }
-      
-      let targetWidth = Int(options.targetResolution.width)
-      let targetHeight = Int(options.targetResolution.height)
+      let baseImage = rawImage.fixedOrientation()
+      print("[captureToMemory] base image size: \(Int(baseImage.size.width))x\(Int(baseImage.size.height))")
+
+      var targetWidth = Int(options.targetResolution.width)
+      var targetHeight = Int(options.targetResolution.height)
 
       // Extract board parameters (screen coordinates from Flutter)
       var boardImage: UIImage?
@@ -491,22 +493,90 @@ final class DefaultCamera: FLTCam, Camera {
         previewHeight = Double(boardData.previewHeight)
         devicePixelRatio = Double(boardData.devicePixelRatio)
         deviceOrientationDegrees = Int(boardData.deviceOrientationDegrees)
+        print("[captureToMemory] board data: position=(\(boardScreenX), \(boardScreenY)) size=\(boardScreenWidth)x\(boardScreenHeight) preview=\(previewWidth)x\(previewHeight) deviceOrientationDegrees=\(deviceOrientationDegrees)")
+      } else {
+        print("[captureToMemory] no board data supplied, using camera defaults")
       }
 
       // Get camera dimensions
-      let actualCameraWidth = Double(baseImage.size.width)
-      let actualCameraHeight = Double(baseImage.size.height)
+      var processingImage = baseImage
+      var cameraRotationApplied: CGFloat = 0
+      let initialCameraWidth = Double(processingImage.size.width)
+      let initialCameraHeight = Double(processingImage.size.height)
 
-      // Detect rotation - same as Android: camera landscape + preview portrait
-      let isCameraLandscape = actualCameraWidth > actualCameraHeight
-      let isPreviewPortrait = previewHeight > previewWidth
-      let needsRotation = isCameraLandscape && isPreviewPortrait
-
-      // Rotate board bitmap in native based on orientation
-      var rotatedBoardImage = boardImage
-      if boardImage != nil && deviceOrientationDegrees != 0 {
-        rotatedBoardImage = rotateImage(boardImage!, degrees: CGFloat(deviceOrientationDegrees))
+      // Ensure the processing target orientation matches the expected output orientation
+      let cameraIsPortrait = initialCameraHeight >= initialCameraWidth
+      let expectedPortrait: Bool
+      if options.boardData != nil {
+        expectedPortrait = deviceOrientationDegrees == 0 || deviceOrientationDegrees == 180
+      } else {
+        expectedPortrait = cameraIsPortrait
       }
+
+      if expectedPortrait && targetWidth > targetHeight {
+        swap(&targetWidth, &targetHeight)
+      } else if !expectedPortrait && targetHeight > targetWidth {
+        swap(&targetWidth, &targetHeight)
+      }
+      print("[captureToMemory] cameraIsPortrait=\(cameraIsPortrait) expectedPortrait=\(expectedPortrait) targetResolution=\(targetWidth)x\(targetHeight)")
+
+      // Rotate camera image when its orientation does not match the expected output
+      if cameraIsPortrait != expectedPortrait {
+        let normalizedOrientation = ((deviceOrientationDegrees % 360) + 360) % 360
+        var rotationDegrees: CGFloat = 0
+
+        if cameraIsPortrait {
+          // Camera output is portrait, but we expect landscape.
+          switch normalizedOrientation {
+          case 90:
+            rotationDegrees = -90  // landscapeLeft
+          case 270:
+            rotationDegrees = 90  // landscapeRight
+          case 180:
+            rotationDegrees = 180
+          default:
+            rotationDegrees = -90
+          }
+        } else {
+          // Camera output is landscape, but we expect portrait.
+          switch normalizedOrientation {
+          case 90:
+            rotationDegrees = 90
+          case 270:
+            rotationDegrees = -90
+          case 180:
+            rotationDegrees = 180
+          default:
+            rotationDegrees = 90
+          }
+        }
+
+        print("[captureToMemory] rotation decision -> normalizedOrientation=\(normalizedOrientation), rotationDegrees=\(rotationDegrees)")
+        cameraRotationApplied = rotationDegrees
+        if rotationDegrees != 0 {
+          processingImage = rotateImage(processingImage, degrees: rotationDegrees)
+        }
+      } else {
+        print("[captureToMemory] orientations already aligned, no camera rotation needed")
+      }
+
+      let actualCameraWidth = Double(processingImage.size.width)
+      let actualCameraHeight = Double(processingImage.size.height)
+      print("[captureToMemory] processing image size: \(Int(actualCameraWidth))x\(Int(actualCameraHeight)), cameraRotationApplied=\(cameraRotationApplied)")
+
+        // Rotate board bitmap in native based on orientation
+        var rotatedBoardImage = boardImage
+        if let boardImage = boardImage {
+         print("[captureToMemory] board image size before rotation: \(Int(boardImage.size.width))x\(Int(boardImage.size.height))")
+          let boardRotationDegrees = CGFloat(deviceOrientationDegrees)
+          if abs(boardRotationDegrees).truncatingRemainder(dividingBy: 360) > .ulpOfOne {
+            let rotated = rotateImage(boardImage, degrees: boardRotationDegrees)
+            rotatedBoardImage = rotated
+            print("[captureToMemory] rotated board image by \(boardRotationDegrees)° -> size: \(Int(rotated.size.width))x\(Int(rotated.size.height))")
+          } else {
+            print("[captureToMemory] board rotation skipped (deviceOrientationDegrees=\(deviceOrientationDegrees))")
+          }
+        }
 
       // Resize camera to target resolution FIRST (before rotation - much faster!)
       let scaleToFillW = Double(targetWidth) / actualCameraWidth
@@ -516,7 +586,7 @@ final class DefaultCamera: FLTCam, Camera {
       let resizedW = Int(actualCameraWidth * fillScale)
       let resizedH = Int(actualCameraHeight * fillScale)
 
-      let resizedBitmap = resizeImage(baseImage, to: CGSize(width: resizedW, height: resizedH))
+      let resizedBitmap = resizeImage(processingImage, to: CGSize(width: resizedW, height: resizedH))
 
       // Center crop to target size (still landscape orientation)
       var croppedBitmap = resizedBitmap
@@ -526,19 +596,25 @@ final class DefaultCamera: FLTCam, Camera {
         croppedBitmap = cropImage(resizedBitmap, to: CGSize(width: targetWidth, height: targetHeight), origin: CGPoint(x: cropOffsetX, y: cropOffsetY))
       }
 
-      // Rotate if needed (BEFORE merging board - so board stays correct orientation!)
-      var orientedBitmap = croppedBitmap
-      if needsRotation {
-        // Match Android's clockwise 90° rotation (UIKit positive angles rotate counter-clockwise)
-        orientedBitmap = rotateImage(croppedBitmap, degrees: -90)
+      // Image is already oriented correctly, so no manual rotation is needed.
+      let orientedBitmap = croppedBitmap
+
+      // Rotate camera bitmap to match final device orientation before merging board
+      let renderBitmap: UIImage
+      if deviceOrientationDegrees != 0 {
+        let rotationDegrees = CGFloat(deviceOrientationDegrees)
+        renderBitmap = rotateImage(orientedBitmap, degrees: rotationDegrees)
+        print("[captureToMemory] rotated base image by \(rotationDegrees)° -> size: \(Int(renderBitmap.size.width))x\(Int(renderBitmap.size.height))")
+      } else {
+        renderBitmap = orientedBitmap
       }
 
       // Merge board
-      var finalBitmap = orientedBitmap
+      var finalBitmap = renderBitmap
 
       if rotatedBoardImage != nil {
-        let finalWidth = Double(orientedBitmap.size.width)
-        let finalHeight = Double(orientedBitmap.size.height)
+        let finalWidth = Double(renderBitmap.size.width)
+        let finalHeight = Double(renderBitmap.size.height)
 
         let scaleX = finalWidth / previewWidth
         let scaleY = finalHeight / previewHeight
@@ -549,25 +625,47 @@ final class DefaultCamera: FLTCam, Camera {
         let offsetX = (scaledPreviewWidth - finalWidth) / 2.0
         let offsetY = (scaledPreviewHeight - finalHeight) / 2.0
 
-        let desiredBoardW = Int(round(boardScreenWidth * scale))
-        let desiredBoardH = Int(round(boardScreenHeight * scale))
+        var mappedBoardScreenWidth = boardScreenWidth
+        var mappedBoardScreenHeight = boardScreenHeight
+        if let boardImage = rotatedBoardImage {
+          let boardImageIsLandscape = boardImage.size.width >= boardImage.size.height
+          let boardScreenIsLandscape = boardScreenWidth >= boardScreenHeight
+          if boardImageIsLandscape != boardScreenIsLandscape {
+            print("[captureToMemory] board aspect mismatch detected - swapping width/height for mapping")
+            swap(&mappedBoardScreenWidth, &mappedBoardScreenHeight)
+          }
+        }
+
+        let desiredBoardW = Int(round(mappedBoardScreenWidth * scale))
+        let desiredBoardH = Int(round(mappedBoardScreenHeight * scale))
         let desiredBoardX = Int(round(boardScreenX * scale - offsetX))
         let desiredBoardY = Int(round(boardScreenY * scale - offsetY))
+
+        print("[captureToMemory] board mapping -> desired size=\(desiredBoardW)x\(desiredBoardH) position=(\(desiredBoardX), \(desiredBoardY)) scale=\(scale) offsets=(\(offsetX), \(offsetY))")
 
         let clampedBoardW = max(1, min(desiredBoardW, Int(finalWidth)))
         let clampedBoardH = max(1, min(desiredBoardH, Int(finalHeight)))
         let clampedBoardX = max(0, min(desiredBoardX, Int(finalWidth) - clampedBoardW))
         let clampedBoardY = max(0, min(desiredBoardY, Int(finalHeight) - clampedBoardH))
+        if clampedBoardW != desiredBoardW || clampedBoardH != desiredBoardH || clampedBoardX != desiredBoardX || clampedBoardY != desiredBoardY {
+          print("[captureToMemory] board clamped to size=\(clampedBoardW)x\(clampedBoardH) position=(\(clampedBoardX), \(clampedBoardY))")
+        }
 
-        let boardToDraw = resizeImage(rotatedBoardImage!, to: CGSize(width: clampedBoardW, height: clampedBoardH))
+      let boardToDraw = resizeImage(rotatedBoardImage!, to: CGSize(width: clampedBoardW, height: clampedBoardH))
 
-        finalBitmap = mergeImage(orientedBitmap, with: boardToDraw, at: CGPoint(x: clampedBoardX, y: clampedBoardY))
+        // Preserve orientation before merge
+        let originalOrientation = renderBitmap.imageOrientation
+        let mergedImage = mergeImage(renderBitmap, with: boardToDraw, at: CGPoint(x: clampedBoardX, y: clampedBoardY))
+        // Restore original orientation after merge
+        finalBitmap = UIImage(cgImage: mergedImage.cgImage!, scale: mergedImage.scale, orientation: originalOrientation)
+        print("[captureToMemory] preserved orientation after merge: \(originalOrientation.rawValue)")
+        print("[captureToMemory] final bitmap size: \(Int(finalBitmap.size.width))x\(Int(finalBitmap.size.height))")
       }
 
       let uprightBitmap = finalBitmap.fixedOrientation()
 
       // Encode to JPEG
-      guard let resultBytes = uprightBitmap.jpegData(compressionQuality: 0.9) else {
+      guard let resultBytes = uprightBitmap.jpegData(compressionQuality: 0.85) else {
         completion(
           nil,
           Int(uprightBitmap.size.width),

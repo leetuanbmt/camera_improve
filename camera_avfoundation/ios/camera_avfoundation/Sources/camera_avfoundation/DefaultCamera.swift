@@ -564,21 +564,22 @@ final class DefaultCamera: FLTCam, Camera {
       let actualCameraHeight = Double(processingImage.size.height)
       print("[captureToMemory] processing image size: \(Int(actualCameraWidth))x\(Int(actualCameraHeight)), cameraRotationApplied=\(cameraRotationApplied)")
 
-        // Rotate board bitmap in native based on orientation
-        var rotatedBoardImage = boardImage
-        if let boardImage = boardImage {
-         print("[captureToMemory] board image size before rotation: \(Int(boardImage.size.width))x\(Int(boardImage.size.height))")
+      // Rotate board bitmap in native based on orientation
+      var rotatedBoardImage = boardImage
+      if let boardImage = boardImage {
+       print("[captureToMemory] board image size before rotation: \(Int(boardImage.size.width))x\(Int(boardImage.size.height))")
+        // Skip rotation for portrait (0°) and upside down (180°)
+        // Only rotate for landscape orientations (90° and 270°)
+        let shouldRotateBoard = deviceOrientationDegrees == 90 || deviceOrientationDegrees == 270
+        if shouldRotateBoard {
           let boardRotationDegrees = CGFloat(deviceOrientationDegrees)
-          if abs(boardRotationDegrees).truncatingRemainder(dividingBy: 360) > .ulpOfOne {
-            let rotated = rotateImage(boardImage, degrees: boardRotationDegrees)
-            rotatedBoardImage = rotated
-            print("[captureToMemory] rotated board image by \(boardRotationDegrees)° -> size: \(Int(rotated.size.width))x\(Int(rotated.size.height))")
-          } else {
-            print("[captureToMemory] board rotation skipped (deviceOrientationDegrees=\(deviceOrientationDegrees))")
-          }
+          let rotated = rotateImage(boardImage, degrees: boardRotationDegrees)
+          rotatedBoardImage = rotated
+          print("[captureToMemory] rotated board image by \(boardRotationDegrees)° -> size: \(Int(rotated.size.width))x\(Int(rotated.size.height))")
+        } else {
+          print("[captureToMemory] board rotation skipped (deviceOrientationDegrees=\(deviceOrientationDegrees))")
         }
-
-      // Resize camera to target resolution FIRST (before rotation - much faster!)
+      }      // Resize camera to target resolution FIRST (before rotation - much faster!)
       let scaleToFillW = Double(targetWidth) / actualCameraWidth
       let scaleToFillH = Double(targetHeight) / actualCameraHeight
       let fillScale = max(scaleToFillW, scaleToFillH)

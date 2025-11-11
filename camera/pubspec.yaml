@@ -19,6 +19,8 @@ flutter:
         default_package: camera_avfoundation
 
 dependencies:
+  camera_android:
+    path: ../camera_android
   camera_avfoundation:
     path: ../camera_avfoundation
   camera_platform_interface:

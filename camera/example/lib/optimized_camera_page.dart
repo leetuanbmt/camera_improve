@@ -204,7 +204,7 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
     }
   }
 
-  // ============================================================================
+  // ==================================================================op==========
   // CAPTURE FUNCTIONS
   // ============================================================================
   Future<void> _takePicture() async {
@@ -240,16 +240,16 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
         }
         // Save processed image
         final String finalImagePath = await saveImage(result.result.bytes);
-        // Navigator.push(
-        //   context,
-        //   MaterialPageRoute(
-        //     builder: (context) => PdfPreview(imagePath: finalImagePath),
-        //   ),
-        // );
-        setState(() {
-          _capturedImage = XFile(finalImagePath);
-          _isProcessing = false;
-        });
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PdfPreview(
+              imagePath: finalImagePath,
+              width: result.result.width.toDouble(),
+              height: result.result.height.toDouble(),
+            ),
+          ),
+        );
       } catch (e) {
         Logger.e('Error');
       }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf_combiner/models/image_scale.dart';
 import 'package:pdf_combiner/models/pdf_from_multiple_image_config.dart';
 import 'package:pdf_combiner/pdf_combiner.dart';
 import 'package:pdf_combiner/responses/pdf_combiner_status.dart';
@@ -8,9 +9,14 @@ import 'package:pdfx/pdfx.dart';
 import 'logger.dart';
 
 class PdfPreview extends StatefulWidget {
-  const PdfPreview({super.key, required this.imagePath});
+  const PdfPreview(
+      {super.key,
+      required this.imagePath,
+      required this.width,
+      required this.height});
   final String imagePath;
-
+  final double width;
+  final double height;
   @override
   State<PdfPreview> createState() => _PdfPreviewState();
 }
@@ -36,7 +42,10 @@ class _PdfPreviewState extends State<PdfPreview> {
       final response = await PdfCombiner.createPDFFromMultipleImages(
         inputPaths: [widget.imagePath],
         outputPath: pdfPath,
-        config: PdfFromMultipleImageConfig(),
+        config: PdfFromMultipleImageConfig(
+          rescale: ImageScale(
+              width: widget.width.toInt(), height: widget.height.toInt()),
+        ),
       );
 
       if (response.status == PdfCombinerStatus.success) {

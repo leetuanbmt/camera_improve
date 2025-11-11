@@ -4,6 +4,8 @@
 
 import CoreMotion
 import UIKit
+import ImageIO
+import MobileCoreServices
 
 // Import Objectice-C part of the implementation when SwiftPM is used.
 #if canImport(camera_avfoundation_objc)
@@ -564,7 +566,6 @@ final class DefaultCamera: FLTCam, Camera {
     var boardScreenHeight: Double = 0
     var previewWidth: Double = Double(originalWidth)
     var previewHeight: Double = Double(originalHeight)
-    var devicePixelRatio: Double = 1.0
     var deviceOrientationDegrees: Int = 0
 
     if let boardData = options.boardData {
@@ -576,7 +577,6 @@ final class DefaultCamera: FLTCam, Camera {
       boardScreenHeight = Double(boardData.boardScreenHeight)
       previewWidth = Double(boardData.previewWidth)
       previewHeight = Double(boardData.previewHeight)
-      devicePixelRatio = Double(boardData.devicePixelRatio)
       deviceOrientationDegrees = Int(boardData.deviceOrientationDegrees)
       print("[captureToMemory] board data: position=(\(boardScreenX), \(boardScreenY)) size=\(boardScreenWidth)x\(boardScreenHeight) preview=\(previewWidth)x\(previewHeight) deviceOrientationDegrees=\(deviceOrientationDegrees)")
     } else {
@@ -743,10 +743,21 @@ final class DefaultCamera: FLTCam, Camera {
           swap(&mappedBoardScreenWidth, &mappedBoardScreenHeight)
         }
 
+        // Transform board position for upside down orientation only
+        var transformedBoardX = boardScreenX
+        var transformedBoardY = boardScreenY
+        
+        if deviceOrientationDegrees == 180 {
+          // Upside down - flip both coordinates
+          transformedBoardX = previewWidth - (boardScreenX + boardScreenWidth)
+          transformedBoardY = previewHeight - (boardScreenY + boardScreenHeight)
+          print("[captureToMemory] board position transform for upside down: original=(\(boardScreenX), \(boardScreenY)) transformed=(\(transformedBoardX), \(transformedBoardY))")
+        }
+
         let desiredBoardW = Int(round(mappedBoardScreenWidth * scale))
         let desiredBoardH = Int(round(mappedBoardScreenHeight * scale))
-        let desiredBoardX = Int(round(boardScreenX * scale - offsetX))
-        let desiredBoardY = Int(round(boardScreenY * scale - offsetY))
+        let desiredBoardX = Int(round(transformedBoardX * scale - offsetX))
+        let desiredBoardY = Int(round(transformedBoardY * scale - offsetY))
 
         print("[captureToMemory] board mapping -> desired size=\(desiredBoardW)x\(desiredBoardH) position=(\(desiredBoardX), \(desiredBoardY)) scale=\(scale) offsets=(\(offsetX), \(offsetY))")
 
@@ -787,8 +798,9 @@ final class DefaultCamera: FLTCam, Camera {
     let orientTime = CFAbsoluteTimeGetCurrent()
     print("[Performance] Render & fix orientation took: \(Int((orientTime - mergeTime) * 1000))ms")
 
-    // Encode to JPEG
-    guard let resultBytes = uprightBitmap.jpegData(compressionQuality: 0.85) else {
+    // Encode to JPEG with EXIF orientation
+    guard let cgImage = uprightBitmap.cgImage,
+          let resultBytes = encodeJPEGWithEXIF(cgImage: cgImage, deviceOrientationDegrees: deviceOrientationDegrees, quality: 0.85) else {
       completion(
         nil,
         Int(uprightBitmap.size.width),
@@ -808,6 +820,50 @@ final class DefaultCamera: FLTCam, Camera {
       nil)
   }
 
+}
+
+// Helper function to encode JPEG with EXIF orientation
+private func encodeJPEGWithEXIF(cgImage: CGImage, deviceOrientationDegrees: Int, quality: CGFloat) -> Data? {
+  let mutableData = NSMutableData()
+  
+  guard let destination = CGImageDestinationCreateWithData(mutableData, kUTTypeJPEG, 1, nil) else {
+    return nil
+  }
+  
+  // Image HAS BEEN rotated by deviceOrientationDegrees (lines 707-713)
+  // Need to set EXIF to tell PDF reader to rotate BACK to compensate
+  // Example: Image rotated +90° → EXIF should say "rotate -90° to view" → EXIF 8
+  let exifOrientation: Int
+  switch deviceOrientationDegrees {
+  case 0:
+    exifOrientation = 1  // No rotation applied, normal orientation
+  case 90:
+    // Image rotated +90° → PDF needs to rotate -90° (=270° CW) to view → EXIF 8
+    exifOrientation = 8
+  case 180:
+    // Image rotated 180° → PDF needs to rotate 180° to view → EXIF 3
+    exifOrientation = 3
+  case 270:
+    // Image rotated +270° (=-90°) → PDF needs to rotate +90° CW to view → EXIF 6
+    exifOrientation = 6
+  default:
+    exifOrientation = 1
+  }
+  
+  let properties: [CFString: Any] = [
+    kCGImagePropertyOrientation: exifOrientation,
+    kCGImageDestinationLossyCompressionQuality: quality
+  ]
+  
+  CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+  
+  guard CGImageDestinationFinalize(destination) else {
+    return nil
+  }
+  
+  print("[captureToMemory] EXIF orientation set to \(exifOrientation) (compensating for \(deviceOrientationDegrees)° pixel rotation)")
+  
+  return mutableData as Data
 }
 
 private extension UIImage {

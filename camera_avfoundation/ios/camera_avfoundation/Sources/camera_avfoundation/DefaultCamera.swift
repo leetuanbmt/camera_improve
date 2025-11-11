@@ -461,12 +461,14 @@ final class DefaultCamera: FLTCam, Camera {
     }
     
     guard let buffer = pixelBuffer else {
+      print("[capturePreviewBuffer] ❌ No preview buffer available - latestPixelBuffer is nil")
       return nil
     }
     
     let width = CVPixelBufferGetWidth(buffer)
     let height = CVPixelBufferGetHeight(buffer)
     
+    print("[capturePreviewBuffer] ✅ Preview buffer captured: \(width)x\(height)")
     return (buffer, width, height)
   }
   
@@ -490,56 +492,73 @@ final class DefaultCamera: FLTCam, Camera {
     let startTime = CFAbsoluteTimeGetCurrent()
     
     // Try to capture from preview buffer first (much faster!)
-    if let (pixelBuffer, bufferWidth, bufferHeight) = capturePreviewBuffer() {
-      let captureTime = CFAbsoluteTimeGetCurrent()
-      print("[Performance] Preview buffer capture took: \(Int((captureTime - startTime) * 1000))ms")
-      
-      // Convert CVPixelBuffer to CIImage directly (no decode needed!)
-      let baseCIImage = CIImage(cvPixelBuffer: pixelBuffer)
-      
-      print("[captureToMemory] preview buffer size: \(bufferWidth)x\(bufferHeight)")
-      
-      // Continue with processing pipeline...
-      self.processImage(
-        ciImage: baseCIImage,
-        originalWidth: bufferWidth,
-        originalHeight: bufferHeight,
-        options: options,
-        captureTime: captureTime,
-        completion: completion)
-      
-    } else {
-      // Fallback to full-res capture if preview buffer not available
-      print("[Performance] Preview buffer not available, using full-res capture")
-      (self as FLTCam).captureToMemory { data, width, height, error in
+    // Retry a few times if preview buffer not available yet
+    var retryCount = 0
+    let maxRetries = 3
+    
+    func attemptPreviewCapture() {
+      if let (pixelBuffer, bufferWidth, bufferHeight) = capturePreviewBuffer() {
         let captureTime = CFAbsoluteTimeGetCurrent()
-        print("[Performance] Full-res capture took: \(Int((captureTime - startTime) * 1000))ms")
+        print("[Performance] Preview buffer capture took: \(Int((captureTime - startTime) * 1000))ms (retries: \(retryCount))")
         
-        if let error = error {
-          completion(nil, Int(width), Int(height), error)
-          return
-        }
-        guard let baseData = data,
-              let rawImage = UIImage(data: baseData) else {
-          completion(data, Int(width), Int(height), nil)
-          return
-        }
-        let baseImage = rawImage.fixedOrientation()
-        guard var baseCIImage = makeCIImage(from: baseImage) else {
-          completion(data, Int(baseImage.size.width), Int(baseImage.size.height), nil)
-          return
-        }
-        baseCIImage = normalizedCIImage(baseCIImage)
+        // Convert CVPixelBuffer to CIImage directly (no decode needed!)
+        let baseCIImage = CIImage(cvPixelBuffer: pixelBuffer)
         
+        print("[captureToMemory] preview buffer size: \(bufferWidth)x\(bufferHeight)")
+        
+        // Continue with processing pipeline...
         self.processImage(
           ciImage: baseCIImage,
-          originalWidth: Int(baseImage.size.width),
-          originalHeight: Int(baseImage.size.height),
+          originalWidth: bufferWidth,
+          originalHeight: bufferHeight,
           options: options,
           captureTime: captureTime,
           completion: completion)
+        
+      } else {
+        // Retry if preview buffer not available yet (max 3 times with 10ms delay)
+        retryCount += 1
+        if retryCount < maxRetries {
+          print("[captureToMemory] Preview buffer not ready, retrying (\(retryCount)/\(maxRetries))...")
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+            attemptPreviewCapture()
+          }
+        } else {
+          // Fallback to full-res capture after retries exhausted
+          print("[Performance] Preview buffer not available after \(maxRetries) retries, using full-res capture")
+          (self as FLTCam).captureToMemory { data, width, height, error in
+            let captureTime = CFAbsoluteTimeGetCurrent()
+            print("[Performance] Full-res capture took: \(Int((captureTime - startTime) * 1000))ms")
+            
+            if let error = error {
+              completion(nil, Int(width), Int(height), error)
+              return
+            }
+            guard let baseData = data,
+                  let rawImage = UIImage(data: baseData) else {
+              completion(data, Int(width), Int(height), nil)
+              return
+            }
+            let baseImage = rawImage.fixedOrientation()
+            guard var baseCIImage = makeCIImage(from: baseImage) else {
+              completion(data, Int(baseImage.size.width), Int(baseImage.size.height), nil)
+              return
+            }
+            baseCIImage = normalizedCIImage(baseCIImage)
+            
+            self.processImage(
+              ciImage: baseCIImage,
+              originalWidth: Int(baseImage.size.width),
+              originalHeight: Int(baseImage.size.height),
+              options: options,
+              captureTime: captureTime,
+              completion: completion)
+          }
+        }
       }
     }
+    
+    attemptPreviewCapture()
   }
   
   private func processImage(

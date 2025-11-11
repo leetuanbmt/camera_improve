@@ -457,114 +457,133 @@ final class DefaultCamera: FLTCam, Camera {
   ) {
     (self as FLTCam).captureToMemory { data, width, height, error in
       if let error = error {
-        completion(nil, width, height, error)
+        completion(nil, Int(width), Int(height), error)
         return
       }
-      
       guard let baseData = data,
-            let baseImage = UIImage(data: baseData)?.fixedOrientation() else {
-        completion(data, width, height, nil)
+            let baseImage = UIImage(data: baseData) else {
+        completion(data, Int(width), Int(height), nil)
         return
       }
       
-      let targetWidth = CGFloat(options.targetResolution.width)
-      let targetHeight = CGFloat(options.targetResolution.height)
-      
-      // Resize base image to target
-      let resizedBase = resizeImage(baseImage, to: CGSize(width: targetWidth, height: targetHeight))
-      
-      if let boardData = options.boardData,
-         let boardImage = UIImage(data: boardData.boardImageBytes.data)?.fixedOrientation() {
-        
-        // Compose with board, passing orientation
-        if let composed = DefaultCamera.composeBoard(
-          baseImage: resizedBase,
-          boardImage: boardImage,
-          boardData: boardData,
-          targetSize: CGSize(width: targetWidth, height: targetHeight)
-        ) {
-          completion(composed, Int(targetWidth), Int(targetHeight), nil)
-          return
-        }
+      let targetWidth = Int(options.targetResolution.width)
+      let targetHeight = Int(options.targetResolution.height)
+
+      // Extract board parameters (screen coordinates from Flutter)
+      var boardImage: UIImage?
+      var boardScreenX: Double = 0
+      var boardScreenY: Double = 0
+      var boardScreenWidth: Double = 0
+      var boardScreenHeight: Double = 0
+      var previewWidth: Double = Double(baseImage.size.width)
+      var previewHeight: Double = Double(baseImage.size.height)
+      var devicePixelRatio: Double = 1.0
+      var deviceOrientationDegrees: Int = 0
+
+      if let boardData = options.boardData {
+        let boardImageData = boardData.boardImageBytes.data as Data
+        boardImage = UIImage(data: boardImageData)?.fixedOrientation()
+        boardScreenX = Double(boardData.boardScreenX)
+        boardScreenY = Double(boardData.boardScreenY)
+        boardScreenWidth = Double(boardData.boardScreenWidth)
+        boardScreenHeight = Double(boardData.boardScreenHeight)
+        previewWidth = Double(boardData.previewWidth)
+        previewHeight = Double(boardData.previewHeight)
+        devicePixelRatio = Double(boardData.devicePixelRatio)
+        deviceOrientationDegrees = Int(boardData.deviceOrientationDegrees)
       }
-      
-      // If no board or compose failed, return resized
-      let resizedData = resizedBase.jpegData(compressionQuality: 0.9)
-      completion(resizedData, Int(targetWidth), Int(targetHeight), nil)
+
+      // Get camera dimensions
+      let actualCameraWidth = Double(baseImage.size.width)
+      let actualCameraHeight = Double(baseImage.size.height)
+
+      // Detect rotation - same as Android: camera landscape + preview portrait
+      let isCameraLandscape = actualCameraWidth > actualCameraHeight
+      let isPreviewPortrait = previewHeight > previewWidth
+      let needsRotation = isCameraLandscape && isPreviewPortrait
+
+      // Rotate board bitmap in native based on orientation
+      var rotatedBoardImage = boardImage
+      if boardImage != nil && deviceOrientationDegrees != 0 {
+        rotatedBoardImage = rotateImage(boardImage!, degrees: CGFloat(deviceOrientationDegrees))
+      }
+
+      // Resize camera to target resolution FIRST (before rotation - much faster!)
+      let scaleToFillW = Double(targetWidth) / actualCameraWidth
+      let scaleToFillH = Double(targetHeight) / actualCameraHeight
+      let fillScale = max(scaleToFillW, scaleToFillH)
+
+      let resizedW = Int(actualCameraWidth * fillScale)
+      let resizedH = Int(actualCameraHeight * fillScale)
+
+      let resizedBitmap = resizeImage(baseImage, to: CGSize(width: resizedW, height: resizedH))
+
+      // Center crop to target size (still landscape orientation)
+      var croppedBitmap = resizedBitmap
+      if resizedW > targetWidth || resizedH > targetHeight {
+        let cropOffsetX = max((resizedW - targetWidth) / 2, 0)
+        let cropOffsetY = max((resizedH - targetHeight) / 2, 0)
+        croppedBitmap = cropImage(resizedBitmap, to: CGSize(width: targetWidth, height: targetHeight), origin: CGPoint(x: cropOffsetX, y: cropOffsetY))
+      }
+
+      // Rotate if needed (BEFORE merging board - so board stays correct orientation!)
+      var orientedBitmap = croppedBitmap
+      if needsRotation {
+        // Match Android's clockwise 90° rotation (UIKit positive angles rotate counter-clockwise)
+        orientedBitmap = rotateImage(croppedBitmap, degrees: -90)
+      }
+
+      // Merge board
+      var finalBitmap = orientedBitmap
+
+      if rotatedBoardImage != nil {
+        let finalWidth = Double(orientedBitmap.size.width)
+        let finalHeight = Double(orientedBitmap.size.height)
+
+        let scaleX = finalWidth / previewWidth
+        let scaleY = finalHeight / previewHeight
+        let scale = max(scaleX, scaleY)
+
+        let scaledPreviewWidth = previewWidth * scale
+        let scaledPreviewHeight = previewHeight * scale
+        let offsetX = (scaledPreviewWidth - finalWidth) / 2.0
+        let offsetY = (scaledPreviewHeight - finalHeight) / 2.0
+
+        let desiredBoardW = Int(round(boardScreenWidth * scale))
+        let desiredBoardH = Int(round(boardScreenHeight * scale))
+        let desiredBoardX = Int(round(boardScreenX * scale - offsetX))
+        let desiredBoardY = Int(round(boardScreenY * scale - offsetY))
+
+        let clampedBoardW = max(1, min(desiredBoardW, Int(finalWidth)))
+        let clampedBoardH = max(1, min(desiredBoardH, Int(finalHeight)))
+        let clampedBoardX = max(0, min(desiredBoardX, Int(finalWidth) - clampedBoardW))
+        let clampedBoardY = max(0, min(desiredBoardY, Int(finalHeight) - clampedBoardH))
+
+        let boardToDraw = resizeImage(rotatedBoardImage!, to: CGSize(width: clampedBoardW, height: clampedBoardH))
+
+        finalBitmap = mergeImage(orientedBitmap, with: boardToDraw, at: CGPoint(x: clampedBoardX, y: clampedBoardY))
+      }
+
+      let uprightBitmap = finalBitmap.fixedOrientation()
+
+      // Encode to JPEG
+      guard let resultBytes = uprightBitmap.jpegData(compressionQuality: 0.9) else {
+        completion(
+          nil,
+          Int(uprightBitmap.size.width),
+          Int(uprightBitmap.size.height),
+          FlutterError(code: "compressError", message: "Failed to compress final image", details: nil))
+        return
+      }
+
+      completion(
+        resultBytes,
+        Int(uprightBitmap.size.width),
+        Int(uprightBitmap.size.height),
+        nil)
     }
   }
 
-  private static func composeBoard(
-    baseImage: UIImage,
-    boardImage: UIImage,
-    boardData: FCPPlatformBoardOverlayData,
-    targetSize: CGSize
-  ) -> Data? {
-    // First, resize base to target (assuming base is already oriented correctly)
-    let resizedBase = resizeImage(baseImage, to: targetSize)
-    
-    // Get orientation degrees
-    let degrees = CGFloat(boardData.deviceOrientationDegrees)
-    
-    // Rotate board image
-    let rotatedBoard = rotateImage(boardImage, degrees: degrees)
-    
-    // Calculate scaled board rect
-    let scale = max(targetSize.width / CGFloat(boardData.previewWidth), targetSize.height / CGFloat(boardData.previewHeight))
-    var boardX = CGFloat(boardData.boardScreenX) * scale
-    var boardY = CGFloat(boardData.boardScreenY) * scale
-    var boardW = CGFloat(boardData.boardScreenWidth) * scale
-    var boardH = CGFloat(boardData.boardScreenHeight) * scale
-    
-    // Adjust for cover offset
-    let scaledPreviewW = CGFloat(boardData.previewWidth) * scale
-    let scaledPreviewH = CGFloat(boardData.previewHeight) * scale
-    let offsetX = (scaledPreviewW - targetSize.width) / 2
-    let offsetY = (scaledPreviewH - targetSize.height) / 2
-    boardX -= offsetX
-    boardY -= offsetY
-    
-    // Now adjust rect based on orientation (since base is in target orientation, adjust board rect accordingly)
-    switch Int(degrees) {
-    case 90: // landscape left
-      // Swap and adjust
-      let temp = boardW
-      boardW = boardH
-      boardH = temp
-      let newX = boardY
-      let newY = targetSize.height - boardX - boardH
-      boardX = newX
-      boardY = newY
-    case 180: // portrait down
-      boardX = targetSize.width - boardX - boardW
-      boardY = targetSize.height - boardY - boardH
-    case 270: // landscape right
-      let temp = boardW
-      boardW = boardH
-      boardH = temp
-      let newX = targetSize.width - boardY - boardW
-      let newY = boardX
-      boardX = newX
-      boardY = newY
-    default: // 0 portrait up
-      break
-    }
-    
-    // Clamp to bounds
-    let boardRect = CGRect(x: boardX, y: boardY, width: boardW, height: boardH).intersection(CGRect(origin: .zero, size: targetSize))
-    if boardRect.isNull || boardRect.width <= 0 || boardRect.height <= 0 {
-      return resizedBase.jpegData(compressionQuality: 0.9)
-    }
-    
-    // Draw
-    UIGraphicsBeginImageContextWithOptions(targetSize, false, 1.0)
-    resizedBase.draw(in: CGRect(origin: .zero, size: targetSize))
-    rotatedBoard.draw(in: boardRect)
-    let composed = UIGraphicsGetImageFromCurrentImageContext()
-    UIGraphicsEndImageContext()
-    
-    return composed?.jpegData(compressionQuality: 0.9)
-  }
 }
 
 private extension UIImage {
@@ -579,22 +598,65 @@ private extension UIImage {
 }
 
 private func resizeImage(_ image: UIImage, to targetSize: CGSize) -> UIImage {
-  let rect = CGRect(origin: .zero, size: targetSize)
   UIGraphicsBeginImageContextWithOptions(targetSize, false, image.scale)
-  image.draw(in: rect)
+  image.draw(
+    in: CGRect(
+      x: 0,
+      y: 0,
+      width: targetSize.width,
+      height: targetSize.height))
   let resized = UIGraphicsGetImageFromCurrentImageContext() ?? image
   UIGraphicsEndImageContext()
   return resized
 }
 
+private func cropImage(_ image: UIImage, to targetSize: CGSize, origin: CGPoint) -> UIImage {
+  UIGraphicsBeginImageContextWithOptions(targetSize, false, image.scale)
+  image.draw(
+    in: CGRect(
+      x: -origin.x,
+      y: -origin.y,
+      width: image.size.width,
+      height: image.size.height))
+  let cropped = UIGraphicsGetImageFromCurrentImageContext() ?? image
+  UIGraphicsEndImageContext()
+  return cropped
+}
+
 private func rotateImage(_ image: UIImage, degrees: CGFloat) -> UIImage {
   let radians = degrees * .pi / 180
-  UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
-  let context = UIGraphicsGetCurrentContext()!
-  context.translateBy(x: image.size.width / 2, y: image.size.height / 2)
+  var newRect = CGRect(origin: .zero, size: image.size)
+    .applying(CGAffineTransform(rotationAngle: radians))
+    .integral
+  newRect.size.width = abs(newRect.size.width)
+  newRect.size.height = abs(newRect.size.height)
+
+  UIGraphicsBeginImageContextWithOptions(newRect.size, false, image.scale)
+  guard let context = UIGraphicsGetCurrentContext() else {
+    UIGraphicsEndImageContext()
+    return image
+  }
+
+  context.translateBy(x: newRect.size.width / 2, y: newRect.size.height / 2)
   context.rotate(by: radians)
-  image.draw(in: CGRect(x: -image.size.width / 2, y: -image.size.height / 2, width: image.size.width, height: image.size.height))
+  image.draw(
+    in: CGRect(
+      x: -image.size.width / 2,
+      y: -image.size.height / 2,
+      width: image.size.width,
+      height: image.size.height))
+
   let rotated = UIGraphicsGetImageFromCurrentImageContext() ?? image
   UIGraphicsEndImageContext()
   return rotated
+}
+
+private func mergeImage(_ baseImage: UIImage, with overlayImage: UIImage, at point: CGPoint) -> UIImage {
+  let finalSize = baseImage.size
+  UIGraphicsBeginImageContextWithOptions(finalSize, false, baseImage.scale)
+  baseImage.draw(in: CGRect(origin: .zero, size: finalSize))
+  overlayImage.draw(in: CGRect(origin: point, size: overlayImage.size))
+  let merged = UIGraphicsGetImageFromCurrentImageContext() ?? baseImage
+  UIGraphicsEndImageContext()
+  return merged
 }

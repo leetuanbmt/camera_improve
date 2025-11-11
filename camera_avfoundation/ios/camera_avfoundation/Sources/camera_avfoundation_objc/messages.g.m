@@ -411,7 +411,8 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
     previewHeight:(double )previewHeight
     devicePixelRatio:(double )devicePixelRatio
     targetWidth:(NSInteger )targetWidth
-    targetHeight:(NSInteger )targetHeight {
+    targetHeight:(NSInteger )targetHeight
+    deviceOrientationDegrees:(NSInteger )deviceOrientationDegrees {
   FCPPlatformBoardOverlayData* pigeonResult = [[FCPPlatformBoardOverlayData alloc] init];
   pigeonResult.boardImageBytes = boardImageBytes;
   pigeonResult.boardScreenX = boardScreenX;
@@ -423,6 +424,7 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
   pigeonResult.devicePixelRatio = devicePixelRatio;
   pigeonResult.targetWidth = targetWidth;
   pigeonResult.targetHeight = targetHeight;
+  pigeonResult.deviceOrientationDegrees = deviceOrientationDegrees;
   return pigeonResult;
 }
 + (FCPPlatformBoardOverlayData *)fromList:(NSArray<id> *)list {
@@ -437,6 +439,7 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
   pigeonResult.devicePixelRatio = [GetNullableObjectAtIndex(list, 7) doubleValue];
   pigeonResult.targetWidth = [GetNullableObjectAtIndex(list, 8) integerValue];
   pigeonResult.targetHeight = [GetNullableObjectAtIndex(list, 9) integerValue];
+  pigeonResult.deviceOrientationDegrees = [GetNullableObjectAtIndex(list, 10) integerValue];
   return pigeonResult;
 }
 + (nullable FCPPlatformBoardOverlayData *)nullableFromList:(NSArray<id> *)list {
@@ -454,6 +457,7 @@ static id GetNullableObjectAtIndex(NSArray<id> *array, NSInteger key) {
     @(self.devicePixelRatio),
     @(self.targetWidth),
     @(self.targetHeight),
+    @(self.deviceOrientationDegrees),
   ];
 }
 @end

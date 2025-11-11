@@ -17,6 +17,10 @@ dependencies:
   flutter:
     sdk: flutter
   path_provider: ^2.0.0
+  pdf_combiner: ^4.4.0
+  pdfx: ^2.9.2
+  screenshot: ^3.0.0
+  sensors_plus: ^7.0.0
   video_player: ^2.7.0
 
 dev_dependencies:

@@ -365,20 +365,35 @@ public final class CameraPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  public func capture(toMemory completion: @escaping (FCPPlatformCapturedImageData?, FlutterError?) -> Void) {
+  public func capture(
+    toMemory options: FCPPlatformCaptureOptions?,
+    completion: @escaping (FCPPlatformCapturedImageData?, FlutterError?) -> Void
+  ) {
     captureSessionQueue.async { [weak self] in
-      self?.sessionQueueCaptureToMemory(completion: completion)
+      self?.sessionQueueCaptureToMemory(options: options, completion: completion)
     }
   }
-  
+
   // This must be called on captureSessionQueue. It is extracted from capture(toMemory:) to make it
   // easier to reason about strong/weak self pointers.
-  private func sessionQueueCaptureToMemory(completion: @escaping (FCPPlatformCapturedImageData?, FlutterError?) -> Void) {
+  private func sessionQueueCaptureToMemory(
+    options: FCPPlatformCaptureOptions?,
+    completion: @escaping (FCPPlatformCapturedImageData?, FlutterError?) -> Void
+  ) {
     guard let camera = camera else {
       completion(nil, FlutterError(code: "CameraNotInitialized", message: "Camera is not initialized", details: nil))
       return
     }
-    camera.captureToMemory { data, width, height, error in
+    guard let captureOptions = options else {
+      completion(
+        nil,
+        FlutterError(
+          code: "InvalidCaptureOptions",
+          message: "Capture options are required for captureToMemory.",
+          details: nil))
+      return
+    }
+    camera.captureToMemory(captureOptions) { data, width, height, error in
       if let error = error {
         completion(nil, error)
       } else if let data = data {

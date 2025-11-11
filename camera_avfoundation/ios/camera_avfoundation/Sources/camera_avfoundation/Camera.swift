@@ -61,6 +61,7 @@ protocol Camera: FlutterTexture, AVCaptureVideoDataOutputSampleBufferDelegate,
 
   func captureToFile(completion: @escaping (_ path: String?, _ error: FlutterError?) -> Void)
   func captureToMemory(
+    _ options: FCPPlatformCaptureOptions,
     completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
   )
 

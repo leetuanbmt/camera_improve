@@ -1,1 +1,0 @@
-../../../Target Support Files/camera_avfoundation/camera_avfoundation-umbrella.h

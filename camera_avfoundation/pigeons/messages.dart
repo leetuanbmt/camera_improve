@@ -197,6 +197,7 @@ class PlatformBoardOverlayData {
     required this.devicePixelRatio,
     required this.targetWidth,
     required this.targetHeight,
+    required this.deviceOrientationDegrees,
   });
 
   final Uint8List boardImageBytes;
@@ -209,6 +210,7 @@ class PlatformBoardOverlayData {
   final double devicePixelRatio;
   final int targetWidth;
   final int targetHeight;
+  final int deviceOrientationDegrees;
 }
 
 @HostApi()

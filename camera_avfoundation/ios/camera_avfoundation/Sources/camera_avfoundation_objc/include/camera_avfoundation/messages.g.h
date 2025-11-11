@@ -229,7 +229,8 @@ typedef NS_ENUM(NSUInteger, FCPPlatformResolutionPreset) {
     previewHeight:(double )previewHeight
     devicePixelRatio:(double )devicePixelRatio
     targetWidth:(NSInteger )targetWidth
-    targetHeight:(NSInteger )targetHeight;
+    targetHeight:(NSInteger )targetHeight
+    deviceOrientationDegrees:(NSInteger )deviceOrientationDegrees;
 @property(nonatomic, strong) FlutterStandardTypedData * boardImageBytes;
 @property(nonatomic, assign) double  boardScreenX;
 @property(nonatomic, assign) double  boardScreenY;
@@ -240,6 +241,7 @@ typedef NS_ENUM(NSUInteger, FCPPlatformResolutionPreset) {
 @property(nonatomic, assign) double  devicePixelRatio;
 @property(nonatomic, assign) NSInteger  targetWidth;
 @property(nonatomic, assign) NSInteger  targetHeight;
+@property(nonatomic, assign) NSInteger  deviceOrientationDegrees;
 @end
 
 /// The codec used by all APIs.

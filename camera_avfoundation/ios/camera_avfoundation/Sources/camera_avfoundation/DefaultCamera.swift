@@ -451,58 +451,142 @@ final class DefaultCamera: FLTCam, Camera {
     }
   }
 
+  // Fast capture from preview buffer (no high-res capture needed)
+  private func capturePreviewBuffer() -> (CVPixelBuffer, Int, Int)? {
+    var pixelBuffer: CVPixelBuffer?
+    pixelBufferSynchronizationQueue.sync {
+      pixelBuffer = latestPixelBuffer
+    }
+    
+    guard let buffer = pixelBuffer else {
+      return nil
+    }
+    
+    let width = CVPixelBufferGetWidth(buffer)
+    let height = CVPixelBufferGetHeight(buffer)
+    
+    return (buffer, width, height)
+  }
+  
+  // Convert CVPixelBuffer to JPEG Data
+  private func pixelBufferToJPEG(_ pixelBuffer: CVPixelBuffer, quality: CGFloat = 0.85) -> Data? {
+    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+    let context = sharedCIContext
+    
+    guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+      return nil
+    }
+    
+    let uiImage = UIImage(cgImage: cgImage)
+    return uiImage.jpegData(compressionQuality: quality)
+  }
+
   func captureToMemory(
     _ options: FCPPlatformCaptureOptions,
     completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
   ) {
-    (self as FLTCam).captureToMemory { data, width, height, error in
-      if let error = error {
-        completion(nil, Int(width), Int(height), error)
-        return
+    let startTime = CFAbsoluteTimeGetCurrent()
+    
+    // Try to capture from preview buffer first (much faster!)
+    if let (pixelBuffer, bufferWidth, bufferHeight) = capturePreviewBuffer() {
+      let captureTime = CFAbsoluteTimeGetCurrent()
+      print("[Performance] Preview buffer capture took: \(Int((captureTime - startTime) * 1000))ms")
+      
+      // Convert CVPixelBuffer to CIImage directly (no decode needed!)
+      let baseCIImage = CIImage(cvPixelBuffer: pixelBuffer)
+      
+      print("[captureToMemory] preview buffer size: \(bufferWidth)x\(bufferHeight)")
+      
+      // Continue with processing pipeline...
+      self.processImage(
+        ciImage: baseCIImage,
+        originalWidth: bufferWidth,
+        originalHeight: bufferHeight,
+        options: options,
+        captureTime: captureTime,
+        completion: completion)
+      
+    } else {
+      // Fallback to full-res capture if preview buffer not available
+      print("[Performance] Preview buffer not available, using full-res capture")
+      (self as FLTCam).captureToMemory { data, width, height, error in
+        let captureTime = CFAbsoluteTimeGetCurrent()
+        print("[Performance] Full-res capture took: \(Int((captureTime - startTime) * 1000))ms")
+        
+        if let error = error {
+          completion(nil, Int(width), Int(height), error)
+          return
+        }
+        guard let baseData = data,
+              let rawImage = UIImage(data: baseData) else {
+          completion(data, Int(width), Int(height), nil)
+          return
+        }
+        let baseImage = rawImage.fixedOrientation()
+        guard var baseCIImage = makeCIImage(from: baseImage) else {
+          completion(data, Int(baseImage.size.width), Int(baseImage.size.height), nil)
+          return
+        }
+        baseCIImage = normalizedCIImage(baseCIImage)
+        
+        self.processImage(
+          ciImage: baseCIImage,
+          originalWidth: Int(baseImage.size.width),
+          originalHeight: Int(baseImage.size.height),
+          options: options,
+          captureTime: captureTime,
+          completion: completion)
       }
-      guard let baseData = data,
-            let rawImage = UIImage(data: baseData) else {
-        completion(data, Int(width), Int(height), nil)
-        return
-      }
-      let baseImage = rawImage.fixedOrientation()
-      print("[captureToMemory] base image size: \(Int(baseImage.size.width))x\(Int(baseImage.size.height))")
+    }
+  }
+  
+  private func processImage(
+    ciImage: CIImage,
+    originalWidth: Int,
+    originalHeight: Int,
+    options: FCPPlatformCaptureOptions,
+    captureTime: CFAbsoluteTime,
+    completion: @escaping (_ data: Data?, _ width: Int, _ height: Int, _ error: FlutterError?) -> Void
+  ) {
+    var processingCIImage = ciImage
+    let imageScale: CGFloat = 1.0
+    
+    print("[captureToMemory] base image size: \(originalWidth)x\(originalHeight)")
 
-      var targetWidth = Int(options.targetResolution.width)
-      var targetHeight = Int(options.targetResolution.height)
+    var targetWidth = Int(options.targetResolution.width)
+    var targetHeight = Int(options.targetResolution.height)
 
-      // Extract board parameters (screen coordinates from Flutter)
-      var boardImage: UIImage?
-      var boardScreenX: Double = 0
-      var boardScreenY: Double = 0
-      var boardScreenWidth: Double = 0
-      var boardScreenHeight: Double = 0
-      var previewWidth: Double = Double(baseImage.size.width)
-      var previewHeight: Double = Double(baseImage.size.height)
-      var devicePixelRatio: Double = 1.0
-      var deviceOrientationDegrees: Int = 0
+    // Extract board parameters (screen coordinates from Flutter)
+    var boardImage: UIImage?
+    var boardScreenX: Double = 0
+    var boardScreenY: Double = 0
+    var boardScreenWidth: Double = 0
+    var boardScreenHeight: Double = 0
+    var previewWidth: Double = Double(originalWidth)
+    var previewHeight: Double = Double(originalHeight)
+    var devicePixelRatio: Double = 1.0
+    var deviceOrientationDegrees: Int = 0
 
-      if let boardData = options.boardData {
-        let boardImageData = boardData.boardImageBytes.data as Data
-        boardImage = UIImage(data: boardImageData)?.fixedOrientation()
-        boardScreenX = Double(boardData.boardScreenX)
-        boardScreenY = Double(boardData.boardScreenY)
-        boardScreenWidth = Double(boardData.boardScreenWidth)
-        boardScreenHeight = Double(boardData.boardScreenHeight)
-        previewWidth = Double(boardData.previewWidth)
-        previewHeight = Double(boardData.previewHeight)
-        devicePixelRatio = Double(boardData.devicePixelRatio)
-        deviceOrientationDegrees = Int(boardData.deviceOrientationDegrees)
-        print("[captureToMemory] board data: position=(\(boardScreenX), \(boardScreenY)) size=\(boardScreenWidth)x\(boardScreenHeight) preview=\(previewWidth)x\(previewHeight) deviceOrientationDegrees=\(deviceOrientationDegrees)")
-      } else {
-        print("[captureToMemory] no board data supplied, using camera defaults")
-      }
+    if let boardData = options.boardData {
+      let boardImageData = boardData.boardImageBytes.data as Data
+      boardImage = UIImage(data: boardImageData)?.fixedOrientation()
+      boardScreenX = Double(boardData.boardScreenX)
+      boardScreenY = Double(boardData.boardScreenY)
+      boardScreenWidth = Double(boardData.boardScreenWidth)
+      boardScreenHeight = Double(boardData.boardScreenHeight)
+      previewWidth = Double(boardData.previewWidth)
+      previewHeight = Double(boardData.previewHeight)
+      devicePixelRatio = Double(boardData.devicePixelRatio)
+      deviceOrientationDegrees = Int(boardData.deviceOrientationDegrees)
+      print("[captureToMemory] board data: position=(\(boardScreenX), \(boardScreenY)) size=\(boardScreenWidth)x\(boardScreenHeight) preview=\(previewWidth)x\(previewHeight) deviceOrientationDegrees=\(deviceOrientationDegrees)")
+    } else {
+      print("[captureToMemory] no board data supplied, using camera defaults")
+    }
 
-      // Get camera dimensions
-      var processingImage = baseImage
-      var cameraRotationApplied: CGFloat = 0
-      let initialCameraWidth = Double(processingImage.size.width)
-      let initialCameraHeight = Double(processingImage.size.height)
+    var cameraRotationApplied: CGFloat = 0
+    let initialExtent = processingCIImage.extent.integral
+    let initialCameraWidth = Double(initialExtent.width)
+      let initialCameraHeight = Double(initialExtent.height)
 
       // Ensure the processing target orientation matches the expected output orientation
       let cameraIsPortrait = initialCameraHeight >= initialCameraWidth
@@ -554,32 +638,42 @@ final class DefaultCamera: FLTCam, Camera {
         print("[captureToMemory] rotation decision -> normalizedOrientation=\(normalizedOrientation), rotationDegrees=\(rotationDegrees)")
         cameraRotationApplied = rotationDegrees
         if rotationDegrees != 0 {
-          processingImage = rotateImage(processingImage, degrees: rotationDegrees)
+          processingCIImage = rotateCIImage(processingCIImage, degrees: rotationDegrees)
         }
       } else {
         print("[captureToMemory] orientations already aligned, no camera rotation needed")
       }
 
-      let actualCameraWidth = Double(processingImage.size.width)
-      let actualCameraHeight = Double(processingImage.size.height)
+      let actualExtent = processingCIImage.extent.integral
+      let actualCameraWidth = Double(actualExtent.width)
+      let actualCameraHeight = Double(actualExtent.height)
       print("[captureToMemory] processing image size: \(Int(actualCameraWidth))x\(Int(actualCameraHeight)), cameraRotationApplied=\(cameraRotationApplied)")
 
       // Rotate board bitmap in native based on orientation
-      var rotatedBoardImage = boardImage
-      if let boardImage = boardImage {
-       print("[captureToMemory] board image size before rotation: \(Int(boardImage.size.width))x\(Int(boardImage.size.height))")
+      var rotatedBoardCIImage: CIImage?
+      if let boardImage = boardImage,
+        var boardCIImage = makeCIImage(from: boardImage) {
+        boardCIImage = normalizedCIImage(boardCIImage)
+        print("[captureToMemory] board image size before rotation: \(Int(boardCIImage.extent.width))x\(Int(boardCIImage.extent.height))")
         // Skip rotation for portrait (0°) and upside down (180°)
-        // Only rotate for landscape orientations (90° and 270°)
+        // For landscape orientations, rotate in opposite direction to compensate
         let shouldRotateBoard = deviceOrientationDegrees == 90 || deviceOrientationDegrees == 270
         if shouldRotateBoard {
-          let boardRotationDegrees = CGFloat(deviceOrientationDegrees)
-          let rotated = rotateImage(boardImage, degrees: boardRotationDegrees)
-          rotatedBoardImage = rotated
-          print("[captureToMemory] rotated board image by \(boardRotationDegrees)° -> size: \(Int(rotated.size.width))x\(Int(rotated.size.height))")
+          // Rotate opposite direction: 90° -> -90° (270°), 270° -> -270° (90°)
+          let boardRotationDegrees = CGFloat(deviceOrientationDegrees == 90 ? -90 : 90)
+          let rotated = rotateCIImage(boardCIImage, degrees: boardRotationDegrees)
+          rotatedBoardCIImage = rotated
+          print("[captureToMemory] rotated board image by \(boardRotationDegrees)° -> size: \(Int(rotated.extent.width))x\(Int(rotated.extent.height))")
         } else {
+          rotatedBoardCIImage = boardCIImage
           print("[captureToMemory] board rotation skipped (deviceOrientationDegrees=\(deviceOrientationDegrees))")
         }
-      }      // Resize camera to target resolution FIRST (before rotation - much faster!)
+      }
+      
+      let boardRotateTime = CFAbsoluteTimeGetCurrent()
+      print("[Performance] Board rotation took: \(Int((boardRotateTime - captureTime) * 1000))ms")
+      
+      // Resize camera to target resolution using GPU (much faster!)
       let scaleToFillW = Double(targetWidth) / actualCameraWidth
       let scaleToFillH = Double(targetHeight) / actualCameraHeight
       let fillScale = max(scaleToFillW, scaleToFillH)
@@ -587,35 +681,48 @@ final class DefaultCamera: FLTCam, Camera {
       let resizedW = Int(actualCameraWidth * fillScale)
       let resizedH = Int(actualCameraHeight * fillScale)
 
-      let resizedBitmap = resizeImage(processingImage, to: CGSize(width: resizedW, height: resizedH))
-
-      // Center crop to target size (still landscape orientation)
-      var croppedBitmap = resizedBitmap
-      if resizedW > targetWidth || resizedH > targetHeight {
-        let cropOffsetX = max((resizedW - targetWidth) / 2, 0)
-        let cropOffsetY = max((resizedH - targetHeight) / 2, 0)
-        croppedBitmap = cropImage(resizedBitmap, to: CGSize(width: targetWidth, height: targetHeight), origin: CGPoint(x: cropOffsetX, y: cropOffsetY))
+      if resizedW > 0, resizedH > 0, abs(fillScale - 1.0) > Double.ulpOfOne {
+        processingCIImage = scaleCIImage(processingCIImage, scaleX: CGFloat(fillScale), scaleY: CGFloat(fillScale))
       }
+      
+      let resizeTime = CFAbsoluteTimeGetCurrent()
+      print("[Performance] Resize took: \(Int((resizeTime - boardRotateTime) * 1000))ms")
 
-      // Image is already oriented correctly, so no manual rotation is needed.
-      let orientedBitmap = croppedBitmap
+      // Center crop to target size using GPU
+      let scaledExtent = processingCIImage.extent.integral
+      let scaledWidth = Int(scaledExtent.width)
+      let scaledHeight = Int(scaledExtent.height)
+      
+      if scaledWidth > targetWidth || scaledHeight > targetHeight {
+        processingCIImage = centerCropCIImage(processingCIImage, to: CGSize(width: targetWidth, height: targetHeight))
+      }
+      
+      let cropTime = CFAbsoluteTimeGetCurrent()
+      print("[Performance] Crop took: \(Int((cropTime - resizeTime) * 1000))ms")
+
+      let orientedCIImage = processingCIImage
 
       // Rotate camera bitmap to match final device orientation before merging board
-      let renderBitmap: UIImage
+      let orientedRenderCIImage: CIImage
       if deviceOrientationDegrees != 0 {
         let rotationDegrees = CGFloat(deviceOrientationDegrees)
-        renderBitmap = rotateImage(orientedBitmap, degrees: rotationDegrees)
-        print("[captureToMemory] rotated base image by \(rotationDegrees)° -> size: \(Int(renderBitmap.size.width))x\(Int(renderBitmap.size.height))")
+        orientedRenderCIImage = rotateCIImage(orientedCIImage, degrees: rotationDegrees)
+        let renderedExtent = orientedRenderCIImage.extent.integral
+        print("[captureToMemory] rotated base image by \(rotationDegrees)° -> size: \(Int(renderedExtent.width))x\(Int(renderedExtent.height))")
       } else {
-        renderBitmap = orientedBitmap
+        orientedRenderCIImage = orientedCIImage
       }
+      
+      let rotateTime = CFAbsoluteTimeGetCurrent()
+      print("[Performance] Camera rotation took: \(Int((rotateTime - cropTime) * 1000))ms")
 
-      // Merge board
-      var finalBitmap = renderBitmap
+      // Merge board using GPU compositing
+      var finalCIImage = orientedRenderCIImage
 
-      if rotatedBoardImage != nil {
-        let finalWidth = Double(renderBitmap.size.width)
-        let finalHeight = Double(renderBitmap.size.height)
+      if let boardCIImage = rotatedBoardCIImage {
+        let finalExtent = orientedRenderCIImage.extent.integral
+        let finalWidth = Double(finalExtent.width)
+        let finalHeight = Double(finalExtent.height)
 
         let scaleX = finalWidth / previewWidth
         let scaleY = finalHeight / previewHeight
@@ -628,13 +735,12 @@ final class DefaultCamera: FLTCam, Camera {
 
         var mappedBoardScreenWidth = boardScreenWidth
         var mappedBoardScreenHeight = boardScreenHeight
-        if let boardImage = rotatedBoardImage {
-          let boardImageIsLandscape = boardImage.size.width >= boardImage.size.height
-          let boardScreenIsLandscape = boardScreenWidth >= boardScreenHeight
-          if boardImageIsLandscape != boardScreenIsLandscape {
-            print("[captureToMemory] board aspect mismatch detected - swapping width/height for mapping")
-            swap(&mappedBoardScreenWidth, &mappedBoardScreenHeight)
-          }
+        let boardExtent = boardCIImage.extent.integral
+        let boardImageIsLandscape = boardExtent.width >= boardExtent.height
+        let boardScreenIsLandscape = boardScreenWidth >= boardScreenHeight
+        if boardImageIsLandscape != boardScreenIsLandscape {
+          print("[captureToMemory] board aspect mismatch detected - swapping width/height for mapping")
+          swap(&mappedBoardScreenWidth, &mappedBoardScreenHeight)
         }
 
         let desiredBoardW = Int(round(mappedBoardScreenWidth * scale))
@@ -652,35 +758,54 @@ final class DefaultCamera: FLTCam, Camera {
           print("[captureToMemory] board clamped to size=\(clampedBoardW)x\(clampedBoardH) position=(\(clampedBoardX), \(clampedBoardY))")
         }
 
-      let boardToDraw = resizeImage(rotatedBoardImage!, to: CGSize(width: clampedBoardW, height: clampedBoardH))
+        // Resize board using GPU
+        var boardToDraw = boardCIImage
+        if boardExtent.width > 0, boardExtent.height > 0,
+          (boardExtent.width != CGFloat(clampedBoardW) || boardExtent.height != CGFloat(clampedBoardH)) {
+          boardToDraw = resizeCIImage(boardToDraw, to: CGSize(width: clampedBoardW, height: clampedBoardH))
+        }
 
-        // Preserve orientation before merge
-        let originalOrientation = renderBitmap.imageOrientation
-        let mergedImage = mergeImage(renderBitmap, with: boardToDraw, at: CGPoint(x: clampedBoardX, y: clampedBoardY))
-        // Restore original orientation after merge
-        finalBitmap = UIImage(cgImage: mergedImage.cgImage!, scale: mergedImage.scale, orientation: originalOrientation)
-        print("[captureToMemory] preserved orientation after merge: \(originalOrientation.rawValue)")
-        print("[captureToMemory] final bitmap size: \(Int(finalBitmap.size.width))x\(Int(finalBitmap.size.height))")
+        // Composite board over camera using GPU (Core Image blend)
+        let translatedBoard = boardToDraw.transformed(
+          by: CGAffineTransform(
+            translationX: CGFloat(clampedBoardX),
+            y: CGFloat(finalHeight) - CGFloat(clampedBoardY) - CGFloat(clampedBoardH)))
+        
+        finalCIImage = translatedBoard.composited(over: finalCIImage)
+        finalCIImage = normalizedCIImage(finalCIImage)
+        let finalExtentAfterMerge = finalCIImage.extent.integral
+        print("[captureToMemory] final bitmap size: \(Int(finalExtentAfterMerge.width))x\(Int(finalExtentAfterMerge.height))")
       }
+      
+    let mergeTime = CFAbsoluteTimeGetCurrent()
+    print("[Performance] Board merge took: \(Int((mergeTime - rotateTime) * 1000))ms")
 
-      let uprightBitmap = finalBitmap.fixedOrientation()
+    // Render CIImage to UIImage
+    let renderedUIImage = renderCIImage(finalCIImage, scale: imageScale, orientation: .up)
+    let uprightBitmap = renderedUIImage.fixedOrientation()
+    
+    let orientTime = CFAbsoluteTimeGetCurrent()
+    print("[Performance] Render & fix orientation took: \(Int((orientTime - mergeTime) * 1000))ms")
 
-      // Encode to JPEG
-      guard let resultBytes = uprightBitmap.jpegData(compressionQuality: 0.85) else {
-        completion(
-          nil,
-          Int(uprightBitmap.size.width),
-          Int(uprightBitmap.size.height),
-          FlutterError(code: "compressError", message: "Failed to compress final image", details: nil))
-        return
-      }
-
+    // Encode to JPEG
+    guard let resultBytes = uprightBitmap.jpegData(compressionQuality: 0.85) else {
       completion(
-        resultBytes,
+        nil,
         Int(uprightBitmap.size.width),
         Int(uprightBitmap.size.height),
-        nil)
+        FlutterError(code: "compressError", message: "Failed to compress final image", details: nil))
+      return
     }
+    
+    let encodeTime = CFAbsoluteTimeGetCurrent()
+    print("[Performance] JPEG encode took: \(Int((encodeTime - orientTime) * 1000))ms")
+    print("[Performance] TOTAL processing took: \(Int((encodeTime - captureTime) * 1000))ms")
+
+    completion(
+      resultBytes,
+      Int(uprightBitmap.size.width),
+      Int(uprightBitmap.size.height),
+      nil)
   }
 
 }
@@ -696,58 +821,103 @@ private extension UIImage {
   }
 }
 
+// Shared CIContext for better performance (reuse across calls)
+private let sharedCIContext: CIContext = {
+  CIContext(options: [.useSoftwareRenderer: false])
+}()
+
+// Core Image helpers - GPU accelerated, much faster than UIGraphics
+private func makeCIImage(from image: UIImage) -> CIImage? {
+  if let ciImage = image.ciImage {
+    return ciImage
+  }
+  if let cgImage = image.cgImage {
+    return CIImage(cgImage: cgImage)
+  }
+  return nil
+}
+
+private func normalizedCIImage(_ ciImage: CIImage) -> CIImage {
+  let extent = ciImage.extent
+  return ciImage.transformed(
+    by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
+}
+
+private func scaleCIImage(_ ciImage: CIImage, scaleX: CGFloat, scaleY: CGFloat) -> CIImage {
+  return ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+}
+
+private func rotateCIImage(_ ciImage: CIImage, degrees: CGFloat) -> CIImage {
+  let radians = degrees * .pi / 180
+  let rotated = ciImage.transformed(by: CGAffineTransform(rotationAngle: radians))
+  return normalizedCIImage(rotated)
+}
+
+private func centerCropCIImage(_ ciImage: CIImage, to targetSize: CGSize) -> CIImage {
+  let extent = ciImage.extent
+  let originX = (extent.width - targetSize.width) / 2
+  let originY = (extent.height - targetSize.height) / 2
+  let cropRect = CGRect(x: originX, y: originY, width: targetSize.width, height: targetSize.height)
+  return ciImage.cropped(to: cropRect).transformed(
+    by: CGAffineTransform(translationX: -originX, y: -originY))
+}
+
+private func resizeCIImage(_ ciImage: CIImage, to targetSize: CGSize) -> CIImage {
+  let extent = ciImage.extent
+  let scaleX = targetSize.width / extent.width
+  let scaleY = targetSize.height / extent.height
+  return scaleCIImage(ciImage, scaleX: scaleX, scaleY: scaleY)
+}
+
+private func renderCIImage(_ ciImage: CIImage, scale: CGFloat, orientation: UIImage.Orientation) -> UIImage {
+  let integralExtent = ciImage.extent.integral
+  if let cgImage = sharedCIContext.createCGImage(ciImage, from: integralExtent) {
+    return UIImage(cgImage: cgImage, scale: scale, orientation: orientation)
+  }
+  return UIImage(ciImage: ciImage)
+}
+
+// Fallback UIGraphics-based functions (kept for compatibility)
 private func resizeImage(_ image: UIImage, to targetSize: CGSize) -> UIImage {
-  UIGraphicsBeginImageContextWithOptions(targetSize, false, image.scale)
-  image.draw(
-    in: CGRect(
-      x: 0,
-      y: 0,
-      width: targetSize.width,
-      height: targetSize.height))
-  let resized = UIGraphicsGetImageFromCurrentImageContext() ?? image
-  UIGraphicsEndImageContext()
-  return resized
+  guard targetSize.width > 0, targetSize.height > 0 else { return image }
+  guard let ciImage = makeCIImage(from: image) else { return image }
+  
+  let scaleX = targetSize.width / image.size.width
+  let scaleY = targetSize.height / image.size.height
+  
+  if abs(scaleX - 1.0) <= .ulpOfOne, abs(scaleY - 1.0) <= .ulpOfOne {
+    return image
+  }
+  
+  let transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+  let scaledImage = ciImage.transformed(by: transform)
+  return renderCIImage(scaledImage, scale: image.scale, orientation: .up)
 }
 
 private func cropImage(_ image: UIImage, to targetSize: CGSize, origin: CGPoint) -> UIImage {
-  UIGraphicsBeginImageContextWithOptions(targetSize, false, image.scale)
-  image.draw(
-    in: CGRect(
-      x: -origin.x,
-      y: -origin.y,
-      width: image.size.width,
-      height: image.size.height))
-  let cropped = UIGraphicsGetImageFromCurrentImageContext() ?? image
-  UIGraphicsEndImageContext()
-  return cropped
+  guard targetSize.width > 0, targetSize.height > 0 else { return image }
+  guard let ciImage = makeCIImage(from: image) else { return image }
+  
+  let targetRect = CGRect(origin: .zero, size: targetSize)
+  let translated = ciImage.transformed(by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
+  let cropped = translated.cropped(to: targetRect)
+  return renderCIImage(cropped, scale: image.scale, orientation: .up)
 }
 
 private func rotateImage(_ image: UIImage, degrees: CGFloat) -> UIImage {
-  let radians = degrees * .pi / 180
-  var newRect = CGRect(origin: .zero, size: image.size)
-    .applying(CGAffineTransform(rotationAngle: radians))
-    .integral
-  newRect.size.width = abs(newRect.size.width)
-  newRect.size.height = abs(newRect.size.height)
-
-  UIGraphicsBeginImageContextWithOptions(newRect.size, false, image.scale)
-  guard let context = UIGraphicsGetCurrentContext() else {
-    UIGraphicsEndImageContext()
+  let normalizedDegrees = degrees.truncatingRemainder(dividingBy: 360)
+  if abs(normalizedDegrees) <= .ulpOfOne {
     return image
   }
-
-  context.translateBy(x: newRect.size.width / 2, y: newRect.size.height / 2)
-  context.rotate(by: radians)
-  image.draw(
-    in: CGRect(
-      x: -image.size.width / 2,
-      y: -image.size.height / 2,
-      width: image.size.width,
-      height: image.size.height))
-
-  let rotated = UIGraphicsGetImageFromCurrentImageContext() ?? image
-  UIGraphicsEndImageContext()
-  return rotated
+  guard let ciImage = makeCIImage(from: image) else { return image }
+  
+  let radians = normalizedDegrees * .pi / 180
+  let rotated = ciImage.transformed(by: CGAffineTransform(rotationAngle: radians))
+  let extent = rotated.extent
+  let normalized = rotated.transformed(
+    by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
+  
+  return renderCIImage(normalized, scale: image.scale, orientation: .up)
 }
 
 private func mergeImage(_ baseImage: UIImage, with overlayImage: UIImage, at point: CGPoint) -> UIImage {

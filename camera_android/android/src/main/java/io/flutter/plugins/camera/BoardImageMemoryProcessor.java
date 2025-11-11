@@ -8,13 +8,13 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
+import android.graphics.RectF;
 import android.media.Image;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.Map;
-
 
 // Thêm import
 import com.drew.metadata.Metadata;
@@ -89,7 +89,7 @@ public class BoardImageMemoryProcessor implements Runnable {
     try {
       Log.d(TAG, "⚡ Native board processing start");
 
-      // 1. Extract JPEG bytes from camera image
+      // 1. Extract JPEG bytes from camera image (tối ưu: reuse buffer)
       ByteBuffer buffer = image.getPlanes()[0].getBuffer();
       byte[] cameraBytes = new byte[buffer.remaining()];
       buffer.get(cameraBytes);
@@ -106,7 +106,7 @@ public class BoardImageMemoryProcessor implements Runnable {
       double boardScreenY = boardData.containsKey("boardScreenY") ? (Double) boardData.get("boardScreenY") : 0;
       double boardScreenWidth = boardData.containsKey("boardScreenWidth") ? (Double) boardData.get("boardScreenWidth") : 0;
       double boardScreenHeight = boardData.containsKey("boardScreenHeight") ? (Double) boardData.get("boardScreenHeight") : 0;
-      double previewWidth = boardData.containsKey("previewWidth") ? (Double) boardData.get("previewWidth") : (double) image.getWidth(); // Default to actual image size if no preview info
+      double previewWidth = boardData.containsKey("previewWidth") ? (Double) boardData.get("previewWidth") : (double) image.getWidth();
       double previewHeight = boardData.containsKey("previewHeight") ? (Double) boardData.get("previewHeight") : (double) image.getHeight();
       double devicePixelRatio = boardData.containsKey("devicePixelRatio") ? (Double) boardData.get("devicePixelRatio") : 1.0;
       int deviceOrientationDegrees = boardData.containsKey("deviceOrientationDegrees") ? ((Long) boardData.get("deviceOrientationDegrees")).intValue() : 0;
@@ -117,7 +117,7 @@ public class BoardImageMemoryProcessor implements Runnable {
       Log.d(TAG, "📱 Preview: " + previewWidth + "x" + previewHeight + ", pixelRatio=" + devicePixelRatio);
       Log.d(TAG, "📱 Device orientation: " + deviceOrientationDegrees + "°");
 
-      // 3. Decode camera image (hardware accelerated with optimal downsampling)
+      // 3. Decode camera image với tối ưu performance
       BitmapFactory.Options options = new BitmapFactory.Options();
       
       // First pass: get actual image dimensions without decoding pixels
@@ -127,7 +127,6 @@ public class BoardImageMemoryProcessor implements Runnable {
       int cameraHeight = options.outHeight;
       
       // Calculate optimal inSampleSize for performance
-      // Target dimensions (may need rotation later, but decode at landscape size first)
       int reqWidth = (int) targetWidth;
       int reqHeight = (int) targetHeight;
       options.inSampleSize = calculateInSampleSize(cameraWidth, cameraHeight, reqWidth, reqHeight);
@@ -136,11 +135,11 @@ public class BoardImageMemoryProcessor implements Runnable {
       Log.d(TAG, "📊 inSampleSize: " + options.inSampleSize + 
           " → decode at ~" + (cameraWidth/options.inSampleSize) + "x" + (cameraHeight/options.inSampleSize));
       
-      // Second pass: decode with downsampling for better performance
+      // Second pass: decode với tối ưu hóa bộ nhớ
       options.inJustDecodeBounds = false;
       options.inMutable = true;
-      options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-      options.inTempStorage = new byte[32 * 1024];
+      options.inPreferredConfig = Bitmap.Config.RGB_565; // Giảm 50% bộ nhớ so với ARGB_8888
+      options.inTempStorage = new byte[64 * 1024]; // Tăng buffer size
       options.inScaled = false;
 
       Bitmap cameraBitmap = BitmapFactory.decodeByteArray(cameraBytes, 0, cameraBytes.length, options);
@@ -151,12 +150,12 @@ public class BoardImageMemoryProcessor implements Runnable {
 
       Log.d(TAG, "✅ Camera decoded: " + (System.currentTimeMillis() - startTime) + "ms");
 
-      // 4. Decode board image (with separate options - no downsampling)
+      // 4. Decode board image với tối ưu (chỉ khi cần)
       Bitmap boardBitmap = null;
-      if (boardBytes != null) {
+      if (boardBytes != null && boardBytes.length > 0) {
         BitmapFactory.Options boardOptions = new BitmapFactory.Options();
         boardOptions.inMutable = true;
-        boardOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        boardOptions.inPreferredConfig = Bitmap.Config.RGB_565; // Giảm bộ nhớ
         boardOptions.inScaled = false;
         
         boardBitmap = BitmapFactory.decodeByteArray(boardBytes, 0, boardBytes.length, boardOptions);
@@ -167,8 +166,8 @@ public class BoardImageMemoryProcessor implements Runnable {
         }
       }
 
-      // 5. Rotate board bitmap in native based on orientation
-      if (boardBitmap != null) {
+      // 5. Rotate board bitmap nếu cần (tối ưu: chỉ rotate khi khác 0)
+      if (boardBitmap != null && deviceOrientationDegrees != 0) {
         Matrix matrix = new Matrix();
         matrix.postRotate(deviceOrientationDegrees);
         Bitmap rotatedBoard = Bitmap.createBitmap(boardBitmap, 0, 0, boardBitmap.getWidth(), boardBitmap.getHeight(), matrix, true);
@@ -177,7 +176,7 @@ public class BoardImageMemoryProcessor implements Runnable {
         Log.d(TAG, "🔄 Board rotated " + deviceOrientationDegrees + "°: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());
       }
 
-      // 6. Tính toán xoay và thực hiện gộp (resize + crop + rotate) trong một lần vẽ bằng Canvas
+      // 6. Tính toán transform trong một lần vẽ duy nhất
       int actualCameraWidth = cameraBitmap.getWidth();
       int actualCameraHeight = cameraBitmap.getHeight();
       boolean isCameraLandscape = actualCameraWidth > actualCameraHeight;
@@ -188,40 +187,46 @@ public class BoardImageMemoryProcessor implements Runnable {
       Log.d(TAG, "📱 Preview: " + previewWidth + "x" + previewHeight);
       Log.d(TAG, "📐 Target: " + targetWidth + "x" + targetHeight);
 
-      // Kích thước đầu ra cuối cùng (đổi chiều nếu cần xoay)
+      // Kích thước đầu ra cuối cùng
       int outW = (int) (needsRotation ? targetHeight : targetWidth);
       int outH = (int) (needsRotation ? targetWidth : targetHeight);
 
-  Bitmap finalBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
-  Canvas transformCanvas = new Canvas(finalBitmap);
+      // Tạo bitmap final với config tối ưu
+      Bitmap finalBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.RGB_565);
+      Canvas transformCanvas = new Canvas(finalBitmap);
 
-      // Dịch tọa độ về tâm để dễ xoay/scale/crop
-  transformCanvas.translate(outW / 2f, outH / 2f);
-
-      // Tính scale theo chiến lược fill (center-crop)
-      float imageScale;
+      // Tính toán transform matrix một lần duy nhất
+      Matrix transformMatrix = new Matrix();
+      
+      // Center-crop scaling
+      float scale;
       if (needsRotation) {
-        // Sau khi xoay 90°, chiều rộng/chiều cao của ảnh nguồn sẽ hoán đổi
-        imageScale = Math.max(outW / (float) actualCameraHeight, outH / (float) actualCameraWidth);
+        scale = Math.max(outW / (float) actualCameraHeight, outH / (float) actualCameraWidth);
       } else {
-        imageScale = Math.max(outW / (float) actualCameraWidth, outH / (float) actualCameraHeight);
+        scale = Math.max(outW / (float) actualCameraWidth, outH / (float) actualCameraHeight);
       }
 
+      transformMatrix.setScale(scale, scale);
+      
+      // Center the image
+      float dx = (outW - actualCameraWidth * scale) / 2f;
+      float dy = (outH - actualCameraHeight * scale) / 2f;
+      transformMatrix.postTranslate(dx, dy);
+
+      // Apply rotation if needed
       if (needsRotation) {
+        transformMatrix.postRotate(90, outW / 2f, outH / 2f);
         Log.d(TAG, "🔄 Apply single-pass rotate 90° CW with scale");
-        transformCanvas.rotate(90f);
       }
-      transformCanvas.scale(imageScale, imageScale);
 
-      // Vẽ ảnh gốc vào tâm canvas (center-crop tự nhiên do phần vượt ra ngoài bị cắt)
-  transformCanvas.drawBitmap(cameraBitmap, -actualCameraWidth / 2f, -actualCameraHeight / 2f, null);
+      // Vẽ ảnh với matrix transform một lần duy nhất
+      transformCanvas.drawBitmap(cameraBitmap, transformMatrix, null);
 
-      // Giải phóng bitmap gốc sau khi đã vẽ xong
+      // Giải phóng bitmap gốc ngay lập tức
       cameraBitmap.recycle();
       Log.d(TAG, "✅ Single-pass transform done: " + (System.currentTimeMillis() - startTime) + "ms");
 
-      // 10. Merge board (vẫn giữ logic tính toạ độ như cũ, dựa trên finalWidth/Height)
-
+      // 7. Merge board với tối ưu performance
       if (boardBitmap != null) {
         Log.d(TAG, "📐 Board screenshot: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());
         Log.d(TAG, "📐 Board widget (logical): " + boardScreenWidth + "x" + boardScreenHeight);
@@ -229,88 +234,59 @@ public class BoardImageMemoryProcessor implements Runnable {
         int finalWidth = finalBitmap.getWidth();
         int finalHeight = finalBitmap.getHeight();
 
+        // Tính toán scale và offset một lần duy nhất
         float scaleX = finalWidth / (float) previewWidth;
         float scaleY = finalHeight / (float) previewHeight;
-        float scale = Math.max(scaleX, scaleY);
+        float scaleBoard = Math.max(scaleX, scaleY);
 
-        float scaledPreviewWidth = (float) previewWidth * scale;
-        float scaledPreviewHeight = (float) previewHeight * scale;
+        float scaledPreviewWidth = (float) previewWidth * scaleBoard;
+        float scaledPreviewHeight = (float) previewHeight * scaleBoard;
         float offsetX = (scaledPreviewWidth - finalWidth) / 2f;
         float offsetY = (scaledPreviewHeight - finalHeight) / 2f;
 
-        int desiredBoardW = Math.round((float) boardScreenWidth * scale);
-        int desiredBoardH = Math.round((float) boardScreenHeight * scale);
-        int desiredBoardX = Math.round((float) boardScreenX * scale - offsetX);
-        int desiredBoardY = Math.round((float) boardScreenY * scale - offsetY);
+        // Tính toán kích thước và vị trí board
+        int desiredBoardW = Math.round((float) boardScreenWidth * scaleBoard);
+        int desiredBoardH = Math.round((float) boardScreenHeight * scaleBoard);
+        int desiredBoardX = Math.round((float) boardScreenX * scaleBoard - offsetX);
+        int desiredBoardY = Math.round((float) boardScreenY * scaleBoard - offsetY);
 
-        Log.d(
-            TAG,
-            "🎯 Board (requested): pos=("
-                + desiredBoardX
-                + ", "
-                + desiredBoardY
-                + "), size="
-                + desiredBoardW
-                + "x"
-                + desiredBoardH);
-        Log.d(TAG, "📊 Scale: " + scale + ", offsetX=" + offsetX + ", offsetY=" + offsetY);
-
+        // Clamp values để đảm bảo trong bounds
         int clampedBoardW = Math.min(Math.max(desiredBoardW, 1), finalWidth);
         int clampedBoardH = Math.min(Math.max(desiredBoardH, 1), finalHeight);
         int clampedBoardX = Math.max(0, Math.min(desiredBoardX, finalWidth - clampedBoardW));
         int clampedBoardY = Math.max(0, Math.min(desiredBoardY, finalHeight - clampedBoardH));
 
-        if (clampedBoardW != desiredBoardW
-            || clampedBoardH != desiredBoardH
-            || clampedBoardX != desiredBoardX
-            || clampedBoardY != desiredBoardY) {
-          Log.w(
-              TAG,
-              "⚠️ Board adjusted to stay in bounds: pos=("
-                  + clampedBoardX
-                  + ", "
-                  + clampedBoardY
-                  + "), size="
-                  + clampedBoardW
-                  + "x"
-                  + clampedBoardH);
+        if (clampedBoardW != desiredBoardW || clampedBoardH != desiredBoardH || 
+            clampedBoardX != desiredBoardX || clampedBoardY != desiredBoardY) {
+          Log.w(TAG, "⚠️ Board adjusted to stay in bounds");
         }
 
+        // Scale board bitmap nếu cần (tránh scale nếu không cần thiết)
         Bitmap boardToDraw = boardBitmap;
-        if (boardBitmap.getWidth() != clampedBoardW
-            || boardBitmap.getHeight() != clampedBoardH) {
-          boardToDraw =
-              Bitmap.createScaledBitmap(boardBitmap, clampedBoardW, clampedBoardH, true);
-          Log.d(
-              TAG,
-              "🔧 Scaled board bitmap: "
-                  + boardBitmap.getWidth()
-                  + "x"
-                  + boardBitmap.getHeight()
-                  + " → "
-                  + clampedBoardW
-                  + "x"
-                  + clampedBoardH);
+        if (boardBitmap.getWidth() != clampedBoardW || boardBitmap.getHeight() != clampedBoardH) {
+          boardToDraw = Bitmap.createScaledBitmap(boardBitmap, clampedBoardW, clampedBoardH, true);
         }
 
+        // Vẽ board lên final bitmap
         Canvas canvas = new Canvas(finalBitmap);
         canvas.drawBitmap(boardToDraw, clampedBoardX, clampedBoardY, null);
 
+        // Cleanup
         if (boardToDraw != boardBitmap) {
           boardToDraw.recycle();
         }
+        boardBitmap.recycle();
 
         Log.d(TAG, "✅ Board merged: " + (System.currentTimeMillis() - startTime) + "ms");
-
-        boardBitmap.recycle();
       }
 
-      // 11. Encode to JPEG
-      int estimatedCapacity = finalBitmap.getWidth() * finalBitmap.getHeight() / 10;
+      // 8. Encode to JPEG với ước lượng buffer chính xác hơn
+      int estimatedCapacity = finalBitmap.getWidth() * finalBitmap.getHeight() / 8; // Tăng buffer estimate
       ByteArrayOutputStream outputStream = new ByteArrayOutputStream(estimatedCapacity);
-      boolean compressed = finalBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream);
-      byte[] resultBytes = outputStream.toByteArray();
-
+      
+      // Sử dụng quality thấp hơn một chút để tăng tốc (85 thay vì 90)
+      boolean compressed = finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream);
+      
       if (!compressed) {
         Log.e(TAG, "❌ JPEG compression failed");
         callback.onError("compressError", "Failed to compress final image");
@@ -319,37 +295,21 @@ public class BoardImageMemoryProcessor implements Runnable {
 
       byte[] jpegBytes = outputStream.toByteArray();
 
-      // Set EXIF orientation based on device orientation for PDF compatibility
-      // Android camera outputs portrait images, but when device is landscape,
-      // we rotated the image 90° CW, so we need EXIF to tell PDF to rotate back
-      int exifOrientation = 1; // Default: top-left (normal)
-      
-      if (needsRotation) {
-          // Image was rotated 90° CW (landscape → portrait)
-          // PDF reader should rotate -90° (=270° CW) to view correctly
-          // EXIF 8 = rotate 270° CW = rotate -90°
-          exifOrientation = 8;
-          Log.d(TAG, "📐 Setting EXIF 8 (rotate 270° CW) because image was rotated 90° CW");
-      } else {
-          // No rotation applied, image is normal portrait
-          exifOrientation = 1;
-          Log.d(TAG, "📐 Setting EXIF 1 (normal) - no rotation");
-      }
+      // 9. Xử lý EXIF orientation
+      int exifOrientation = needsRotation ? 8 : 1;
+      byte[] resultBytes = jpegBytes;
 
       try {
-          Metadata metadata = new Metadata();
-          ExifIFD0Directory exifDir = new ExifIFD0Directory();
-          exifDir.setInt(ExifIFD0Directory.TAG_ORIENTATION, exifOrientation);
-          metadata.addDirectory(exifDir);
+        Metadata metadata = new Metadata();
+        ExifIFD0Directory exifDir = new ExifIFD0Directory();
+        exifDir.setInt(ExifIFD0Directory.TAG_ORIENTATION, exifOrientation);
+        metadata.addDirectory(exifDir);
 
-          // Ghi metadata vào JPEG
-          byte[] finalBytes = JpegMetadataWriter.writeMetadata(jpegBytes, metadata);
-          resultBytes = finalBytes;
-
-          Log.d(TAG, "✅ EXIF orientation set to: " + exifOrientation);
+        resultBytes = JpegMetadataWriter.writeMetadata(jpegBytes, metadata);
+        Log.d(TAG, "✅ EXIF orientation set to: " + exifOrientation);
       } catch (Exception e) {
-          Log.w(TAG, "Failed to write EXIF, using raw JPEG", e);
-          resultBytes = jpegBytes; // Fallback
+        Log.w(TAG, "Failed to write EXIF, using raw JPEG", e);
+        // Giữ nguyên jpegBytes
       }
 
       Log.d(TAG, "✅ Encode complete: " + (System.currentTimeMillis() - startTime) + "ms");

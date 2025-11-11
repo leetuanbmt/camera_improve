@@ -231,25 +231,27 @@ class _OptimizedCameraPageState extends State<OptimizedCameraPage> {
             boardOverlayData: boardOverlayData,
           );
         });
-        Logger.log('📊 Native board processing time: ${result.milliseconds}ms');
-        if (boardOverlayData != null) {
-          Logger.log(
-              '📤 Sending board overlay to native: ${boardOverlayData.toString()}');
-        } else {
-          Logger.log('📤 No board overlay data sent to native');
-        }
+        Logger.log(
+          '📊 Native board processing time: ${result.milliseconds}ms',
+          tag: 'BoardImageProcessor',
+        );
+
         // Save processed image
         final String finalImagePath = await saveImage(result.result.bytes);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PdfPreview(
-              imagePath: finalImagePath,
-              width: result.result.width.toDouble(),
-              height: result.result.height.toDouble(),
-            ),
-          ),
-        );
+        // Navigator.pushReplacement(
+        //   context,
+        //   MaterialPageRoute(
+        //     builder: (context) => PdfPreview(
+        //       imagePath: finalImagePath,
+        //       width: result.result.width.toDouble(),
+        //       height: result.result.height.toDouble(),
+        //     ),
+        //   ),
+        // );
+        setState(() {
+          _capturedImage = XFile(finalImagePath);
+          _isProcessing = false;
+        });
       } catch (e) {
         Logger.e('Error');
       }

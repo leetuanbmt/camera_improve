@@ -55,6 +55,33 @@ public class BoardImageMemoryProcessor implements Runnable {
     this.callback = callback;
   }
 
+  /**
+   * Calculate optimal inSampleSize for downsampling during decode.
+   * Returns power-of-2 value that keeps decoded size >= required size.
+   * 
+   * @param width Actual image width
+   * @param height Actual image height
+   * @param reqWidth Required width
+   * @param reqHeight Required height
+   * @return inSampleSize (1, 2, 4, 8, ...)
+   */
+  private static int calculateInSampleSize(int width, int height, int reqWidth, int reqHeight) {
+    int inSampleSize = 1;
+    
+    if (height > reqHeight || width > reqWidth) {
+      final int halfHeight = height / 2;
+      final int halfWidth = width / 2;
+      
+      // Find largest power-of-2 that keeps decoded size >= required size
+      while ((halfHeight / inSampleSize) >= reqHeight
+          && (halfWidth / inSampleSize) >= reqWidth) {
+        inSampleSize *= 2;
+      }
+    }
+    
+    return inSampleSize;
+  }
+
   @Override
   public void run() {
     long startTime = System.currentTimeMillis();
@@ -90,8 +117,27 @@ public class BoardImageMemoryProcessor implements Runnable {
       Log.d(TAG, "📱 Preview: " + previewWidth + "x" + previewHeight + ", pixelRatio=" + devicePixelRatio);
       Log.d(TAG, "📱 Device orientation: " + deviceOrientationDegrees + "°");
 
-      // 3. Decode camera image (hardware accelerated)
+      // 3. Decode camera image (hardware accelerated with optimal downsampling)
       BitmapFactory.Options options = new BitmapFactory.Options();
+      
+      // First pass: get actual image dimensions without decoding pixels
+      options.inJustDecodeBounds = true;
+      BitmapFactory.decodeByteArray(cameraBytes, 0, cameraBytes.length, options);
+      int cameraWidth = options.outWidth;
+      int cameraHeight = options.outHeight;
+      
+      // Calculate optimal inSampleSize for performance
+      // Target dimensions (may need rotation later, but decode at landscape size first)
+      int reqWidth = (int) targetWidth;
+      int reqHeight = (int) targetHeight;
+      options.inSampleSize = calculateInSampleSize(cameraWidth, cameraHeight, reqWidth, reqHeight);
+      
+      Log.d(TAG, "📊 Camera actual: " + cameraWidth + "x" + cameraHeight);
+      Log.d(TAG, "📊 inSampleSize: " + options.inSampleSize + 
+          " → decode at ~" + (cameraWidth/options.inSampleSize) + "x" + (cameraHeight/options.inSampleSize));
+      
+      // Second pass: decode with downsampling for better performance
+      options.inJustDecodeBounds = false;
       options.inMutable = true;
       options.inPreferredConfig = Bitmap.Config.ARGB_8888;
       options.inTempStorage = new byte[32 * 1024];
@@ -105,10 +151,15 @@ public class BoardImageMemoryProcessor implements Runnable {
 
       Log.d(TAG, "✅ Camera decoded: " + (System.currentTimeMillis() - startTime) + "ms");
 
-      // 4. Decode board image
+      // 4. Decode board image (with separate options - no downsampling)
       Bitmap boardBitmap = null;
       if (boardBytes != null) {
-        boardBitmap = BitmapFactory.decodeByteArray(boardBytes, 0, boardBytes.length, options);
+        BitmapFactory.Options boardOptions = new BitmapFactory.Options();
+        boardOptions.inMutable = true;
+        boardOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        boardOptions.inScaled = false;
+        
+        boardBitmap = BitmapFactory.decodeByteArray(boardBytes, 0, boardBytes.length, boardOptions);
         if (boardBitmap == null) {
           Log.w(TAG, "⚠️ Failed to decode board image, continuing without board");
         } else {
@@ -126,74 +177,50 @@ public class BoardImageMemoryProcessor implements Runnable {
         Log.d(TAG, "🔄 Board rotated " + deviceOrientationDegrees + "°: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());
       }
 
-      // 6. Detect rotation (but DON'T rotate yet - optimize by rotating after resize)
+      // 6. Tính toán xoay và thực hiện gộp (resize + crop + rotate) trong một lần vẽ bằng Canvas
       int actualCameraWidth = cameraBitmap.getWidth();
       int actualCameraHeight = cameraBitmap.getHeight();
       boolean isCameraLandscape = actualCameraWidth > actualCameraHeight;
       boolean isPreviewPortrait = previewHeight > previewWidth;
       boolean needsRotation = isCameraLandscape && isPreviewPortrait;
-      
+
       Log.d(TAG, "📐 Camera size: " + actualCameraWidth + "x" + actualCameraHeight);
       Log.d(TAG, "📱 Preview: " + previewWidth + "x" + previewHeight);
       Log.d(TAG, "📐 Target: " + targetWidth + "x" + targetHeight);
-      
+
+      // Kích thước đầu ra cuối cùng (đổi chiều nếu cần xoay)
+      int outW = (int) (needsRotation ? targetHeight : targetWidth);
+      int outH = (int) (needsRotation ? targetWidth : targetHeight);
+
+  Bitmap finalBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
+  Canvas transformCanvas = new Canvas(finalBitmap);
+
+      // Dịch tọa độ về tâm để dễ xoay/scale/crop
+  transformCanvas.translate(outW / 2f, outH / 2f);
+
+      // Tính scale theo chiến lược fill (center-crop)
+      float imageScale;
       if (needsRotation) {
-        Log.d(TAG, "🔄 Rotation detected - will resize first, then rotate (optimization)");
+        // Sau khi xoay 90°, chiều rộng/chiều cao của ảnh nguồn sẽ hoán đổi
+        imageScale = Math.max(outW / (float) actualCameraHeight, outH / (float) actualCameraWidth);
+      } else {
+        imageScale = Math.max(outW / (float) actualCameraWidth, outH / (float) actualCameraHeight);
       }
 
-      // 7. Resize camera to target resolution FIRST (before rotation - much faster!)
-      float scaleToFillW = (float) targetWidth / cameraBitmap.getWidth();
-      float scaleToFillH = (float) targetHeight / cameraBitmap.getHeight();
-      float fillScale = Math.max(scaleToFillW, scaleToFillH);
+      if (needsRotation) {
+        Log.d(TAG, "🔄 Apply single-pass rotate 90° CW with scale");
+        transformCanvas.rotate(90f);
+      }
+      transformCanvas.scale(imageScale, imageScale);
 
-      int resizedW = (int) (cameraBitmap.getWidth() * fillScale);
-      int resizedH = (int) (cameraBitmap.getHeight() * fillScale);
+      // Vẽ ảnh gốc vào tâm canvas (center-crop tự nhiên do phần vượt ra ngoài bị cắt)
+  transformCanvas.drawBitmap(cameraBitmap, -actualCameraWidth / 2f, -actualCameraHeight / 2f, null);
 
-      Log.d(TAG, "🔧 Resizing: " + cameraBitmap.getWidth() + "x" + cameraBitmap.getHeight() + " → " + resizedW + "x" + resizedH);
-
-      Bitmap resizedBitmap = Bitmap.createScaledBitmap(cameraBitmap, resizedW, resizedH, true);
+      // Giải phóng bitmap gốc sau khi đã vẽ xong
       cameraBitmap.recycle();
+      Log.d(TAG, "✅ Single-pass transform done: " + (System.currentTimeMillis() - startTime) + "ms");
 
-      // 8. Center crop to target size (still landscape orientation)
-      Bitmap croppedBitmap;
-      int cropOffsetX = 0;
-      int cropOffsetY = 0;
-      
-      if (resizedW > targetWidth || resizedH > targetHeight) {
-        cropOffsetX = Math.max(0, (resizedW - (int) targetWidth) / 2);
-        cropOffsetY = Math.max(0, (resizedH - (int) targetHeight) / 2);
-
-        Log.d(TAG, "✂️ Cropping: " + resizedW + "x" + resizedH + " → " + targetWidth + "x" + targetHeight);
-        Log.d(TAG, "✂️ Crop offset: X=" + cropOffsetX + ", Y=" + cropOffsetY);
-
-        croppedBitmap = Bitmap.createBitmap(resizedBitmap, cropOffsetX, cropOffsetY, (int) targetWidth, (int) targetHeight);
-        resizedBitmap.recycle();
-      } else {
-        croppedBitmap = resizedBitmap;
-      }
-
-      Log.d(TAG, "✅ Resize complete: " + (System.currentTimeMillis() - startTime) + "ms");
-
-      // 9. Rotate if needed (BEFORE merging board - so board stays correct orientation!)
-      Bitmap orientedBitmap;
-      if (needsRotation) {
-        Log.d(TAG, "🔄 Rotating resized image 90° CW: " + croppedBitmap.getWidth() + "x" + croppedBitmap.getHeight());
-        
-        Matrix matrix = new Matrix();
-        matrix.postRotate(90);
-        
-        orientedBitmap = Bitmap.createBitmap(croppedBitmap, 0, 0,
-            croppedBitmap.getWidth(), croppedBitmap.getHeight(), matrix, true);
-        
-        croppedBitmap.recycle();
-        Log.d(TAG, "✅ Rotated: " + orientedBitmap.getWidth() + "x" + orientedBitmap.getHeight() + 
-            " (" + (System.currentTimeMillis() - startTime) + "ms)");
-      } else {
-        orientedBitmap = croppedBitmap;
-      }
-
-      // 10. Merge board
-      Bitmap finalBitmap = orientedBitmap;
+      // 10. Merge board (vẫn giữ logic tính toạ độ như cũ, dựa trên finalWidth/Height)
 
       if (boardBitmap != null) {
         Log.d(TAG, "📐 Board screenshot: " + boardBitmap.getWidth() + "x" + boardBitmap.getHeight());

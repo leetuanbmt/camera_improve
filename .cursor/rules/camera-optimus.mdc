@@ -1,0 +1,52 @@
+---
+alwaysApply: true
+---
+
+# Luồng xử lý chuẩn (Flutter & Native)
+
+## 1. Phía Flutter
+
+- **UI:** Giữ ứng dụng ở chế độ dọc (_portrait_).
+- **Camera:** Sử dụng `lockCaptureOrientation` ở chế độ portrait.
+- **Board Widget:**
+  - Sử dụng `RotatedBox` hoặc một cơ chế tương tự để xoay widget "board" theo cảm biến gia tốc của thiết bị.
+  - Điều này đảm bảo trải nghiệm người dùng tốt, giúp UI "board" luôn đúng với hướng thực tế của thiết bị.
+- **Khi chụp ảnh:** Gửi các thông tin sau xuống native code:
+  - Dữ liệu ảnh "board" (`byte[]`, được screenshot, nhưng nội dung đang xoay theo cảm biến gia tốc).
+  - Tọa độ và kích thước của widget "board" trên màn hình Flutter. dã được xử lý kiểm tra theo rotate box
+  - Kích thước của widget `CameraPreview`.
+  - Góc xoay của thiết bị (`deviceOrientationDegrees`) tại thời điểm chụp.
+
+---
+
+## 2. Phía Native (Android/iOS - Logic chung)
+
+### **Bước 1: Nhận và giải mã dữ liệu**
+
+- Nhận ảnh từ camera và các tham số từ Flutter.
+- Giải mã ảnh camera và ảnh "board" thành các đối tượng bitmap của nền tảng (`Bitmap` trên Android, `UIImage` trên iOS).
+
+### **Bước 2: Xoay ảnh "Board"**
+
+- Dựa vào `deviceOrientationDegrees` nhận được từ Flutter, **xoay bitmap của "board" trước**.  
+  _Lưu ý:_ Việc này là bắt buộc vì `RotatedBox` chỉ xoay widget trên UI, không xoay dữ liệu ảnh gốc.
+
+### **Bước 3: Xử lý ảnh Camera (Tối ưu hóa)**
+
+- **Kiểm tra hướng:** Xác định xem ảnh camera có cần xoay 90 độ không (thường xảy ra khi cảm biến camera nằm ngang nhưng app ở chế độ dọc).
+- **Resize & Crop:** Thay đổi kích thước và cắt ảnh camera về `targetResolution` mong muốn. _Thực hiện bước này trước khi xoay để có hiệu năng tốt nhất._
+- **Xoay ảnh Camera:** Nếu cần, thực hiện xoay 90 độ cho ảnh camera đã được resize/crop.
+
+### **Bước 4: Ghép (Merge) ảnh**
+
+- Tính toán lại tọa độ và kích thước của "board" để ánh xạ chính xác lên ảnh camera đã qua xử lý.
+- Vẽ bitmap "board" (đã được xoay ở Bước 2) lên ảnh camera (đã được xử lý ở Bước 3).
+
+### **Bước 5: Xử lý Orientation cho ảnh cuối cùng**
+
+- **iOS:** Sử dụng phương thức như `fixedOrientation()` để "nung" hướng xoay vào dữ liệu pixel, đảm bảo ảnh luôn hiển thị thẳng đứng.
+- **Android:** Ghi thẻ `Exif.TAG_ORIENTATION` vào dữ liệu JPEG, đặt giá trị là `1` (_Top-left_) để báo cho các trình xem ảnh biết rằng ảnh này đã được xoay vật lý và đang ở đúng hướng.
+
+### **Bước 6: Nén và trả về**
+
+- Nén ảnh cuối cùng thành định dạng JPEG và trả về mảng byte cho Flutter.
